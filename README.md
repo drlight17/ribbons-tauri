@@ -1,4 +1,4 @@
-# <img align="center" src="https://raw.githubusercontent.com/drlight17/ribbons-tauri/master/ribbons publish.png">
+# <img align="center" src="https://github.com/drlight17/ribbons-tauri/raw/main/ribbons%20publish.jpg">
 Famous Windows-like Ribbons Screensaver rewritten for multi-platform support with **Tauri 2 (Rust)**.
 
 <table>
@@ -11,11 +11,11 @@ Famous Windows-like Ribbons Screensaver rewritten for multi-platform support wit
   <tbody>
     <tr>
       <td><strong>New modern</strong></td>
-      <td><img src="https://raw.githubusercontent.com/drlight17/ribbons-tauri/master/ribbons_modern-example.gif" width="100%"></td>
+      <td><img src="https://github.com/drlight17/ribbons-tauri/raw/main/ribbons_modern-example.gif" width="100%"></td>
     </tr>
     <tr>
       <td><strong>Classic polygon</strong></td>
-      <td><img src="https://raw.githubusercontent.com/drlight17/ribbons-tauri/master/ribbons-example.gif" width="100%"></td>
+      <td><img src="https://github.com/drlight17/ribbons-tauri/raw/main/ribbons-example.gif" width="100%"></td>
     </tr>
   </tbody>
 </table>
