@@ -1,31 +1,24 @@
 # <img align="center" src="https://raw.githubusercontent.com/drlight17/ribbons-tauri/master/ribbons publish.png">
-Famous Windows-like Ribbons Screensaver rewritten for multi-platform support with **Tauri 2 (Rust)** and the original JavaScript ribbon engines.
+Famous Windows-like Ribbons Screensaver rewritten for multi-platform support with **Tauri 2 (Rust)**.
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/drlight17/ribbons-tauri/master/ribbons_modern-example.gif" width="49%">
-  <img src="https://raw.githubusercontent.com/drlight17/ribbons-tauri/master/ribbons-example.gif" width="49%">
-</p>
-
-## What is included
-
-The Electron shell was replaced by a Rust/Tauri 2 backend. All screensaver features are preserved:
-
-- Modern and classic ribbon engines with live settings preview.
-- Tray icon with **Show now / Pause / Settings / Open config.json / About / Check updates / Restart / Exit**.
-- Multi-monitor windows, optional **stretch over all displays**, and a close button on every physical display.
-- Idle detection, user activity handling, and fullscreen-app detection.
-- System audio / media detection (PulseAudio/PipeWire monitor on Linux, WASAPI/CoreAudio loopback via CPAL on Windows/macOS).
-- Screen lock and suspend/resume handling (freedesktop DBus on Linux, session polling on Windows/macOS).
-- HID device hotplug detection (USB/Bluetooth devices trigger a debounced restart, as before).
-- Run at startup (desktop file + systemd user service on Linux, registry on Windows, LaunchAgent on macOS).
-- Transparent/glass windows, macOS vibrancy and Windows acrylic effects.
-- Global shortcuts: **Ctrl+P** (pause/resume) and **Alt+Shift+Escape** (restart).
-- Date/time overlay with fixed or randomized placement, front/behind ribbon animation.
-- JSON config compatible with the Electron version (same keys; the old lowercase config directory is migrated automatically).
-- Update checks against the GitHub releases API, update menu entry, and optional self-update through the Tauri updater.
-- `UPDATE_BLOCK` support for builds that must not self-update.
-
-The old Electron entry points are kept in `legacy-electron/` for reference. The renderer lives in `ui/`, and the Rust backend lives in `src-tauri/`.
+<table>
+  <thead>
+    <tr>
+      <th>Style</th>
+      <th>Example</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>New modern</strong></td>
+      <td><img src="https://raw.githubusercontent.com/drlight17/ribbons-tauri/master/ribbons_modern-example.gif" width="100%"></td>
+    </tr>
+    <tr>
+      <td><strong>Classic polygon</strong></td>
+      <td><img src="https://raw.githubusercontent.com/drlight17/ribbons-tauri/master/ribbons-example.gif" width="100%"></td>
+    </tr>
+  </tbody>
+</table>
 
 ## Minimum OS requirements
 
@@ -55,7 +48,11 @@ Development builds use a `-dev` suffix.
 - Screen lock/suspend events use freedesktop DBus services (`org.freedesktop.ScreenSaver`, `org.freedesktop.login1`). If evdev is unavailable the app falls back to DBus idle time and simply skips activity-based auto-stop until input becomes readable.
 - System audio detection uses `parec` against the default monitor source (`@DEFAULT_MONITOR@`).
 - On Wayland, support depends on the compositor. KDE Plasma and GNOME are the tested environments.
-- Disable the native desktop screensaver to prevent conflicts.
+
+### <ins>So for all the platforms make sure to disable "native" screensaver to prevent conflicts!</ins>
+
+After app startup check it's settings in tray menu:
+<img align="center" width="200" src="https://raw.githubusercontent.com/drlight17/ribbons-electron/refs/heads/main/3.png">
 
 ## Building from source
 
@@ -77,6 +74,7 @@ npm run help       # all build commands and paths
 Build helpers from the original project are still available:
 
 ```bash
+npm run build-json
 npm run build-deb
 npm run build-rpm
 npm run build-AppImage
