@@ -43,83 +43,103 @@ pub fn create_screensaver_windows(app: &AppHandle) {
     }
 
     for display in &displays {
-        let label = window_label(&display.id);
-        if app.get_webview_window(&label).is_some() {
-            continue;
-        }
+        create_screensaver_window(app, display);
+    }
+}
 
-        let builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("index.html".into()))
-            .title(APP_NAME)
-            .inner_size(display.bounds.width, display.bounds.height)
-            .position(display.bounds.x, display.bounds.y)
-            .decorations(false)
-            .transparent(true)
-            .always_on_top(true)
-            .skip_taskbar(true)
-            .shadow(false)
-            .resizable(false)
-            .visible(false)
-            .focused(false);
+fn create_screensaver_window(
+    app: &AppHandle,
+    display: &DisplayInfo,
+) -> Option<tauri::WebviewWindow> {
+    let label = window_label(&display.id);
+    if let Some(existing) = app.get_webview_window(&label) {
+        return Some(existing);
+    }
 
-        match builder.build() {
-            Ok(window) => {
-                if let Some(icon) = tray::load_window_icon(app) {
-                    let _ = window.set_icon(icon);
-                }
-                let _ = window.set_always_on_top(true);
-                let _ = window.set_visible_on_all_workspaces(true);
-                raise_to_screensaver_level(&window);
-                let _ = window.set_focusable(false);
-                apply_physical_bounds(&window, display);
+    {
+        let state = app.state::<AppState>();
+        state
+            .runtime
+            .lock()
+            .unwrap()
+            .windows
+            .entry(display.id.clone())
+            .or_default();
+    }
 
-                let state = app.state::<AppState>();
-                let glass = state
+    let builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("index.html".into()))
+        .title(APP_NAME)
+        .inner_size(display.bounds.width, display.bounds.height)
+        .position(display.bounds.x, display.bounds.y)
+        .decorations(false)
+        .transparent(true)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .shadow(false)
+        .resizable(false)
+        .visible(false)
+        .focused(false);
+
+    match builder.build() {
+        Ok(window) => {
+            if let Some(icon) = tray::load_window_icon(app) {
+                let _ = window.set_icon(icon);
+            }
+            let _ = window.set_always_on_top(true);
+            let _ = window.set_visible_on_all_workspaces(true);
+            raise_to_screensaver_level(&window);
+            let _ = window.set_focusable(false);
+            apply_physical_bounds(&window, display);
+
+            let state = app.state::<AppState>();
+            let glass = state
+                .store
+                .lock()
+                .map(|s| s.get_str("backgroundMode").as_deref() == Some("glass"))
+                .unwrap_or(false);
+            if glass {
+                apply_window_glass(&window);
+            }
+            if glass
+                || state
                     .store
                     .lock()
-                    .map(|s| s.get_str("backgroundMode").as_deref() == Some("glass"))
-                    .unwrap_or(false);
-                if glass {
-                    apply_window_glass(&window);
-                }
-                if glass
-                    || state
-                        .store
+                    .map(|s| s.get_str("backgroundMode").as_deref() == Some("transparent"))
+                    .unwrap_or(false)
+            {
+                let _ = window.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)));
+            }
+
+            let app2 = app.clone();
+            let id2 = display.id.clone();
+            window.on_window_event(move |event| {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    let quitting = app2
+                        .state::<AppState>()
+                        .runtime
                         .lock()
-                        .map(|s| s.get_str("backgroundMode").as_deref() == Some("transparent"))
-                        .unwrap_or(false)
-                {
-                    let _ = window.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)));
-                }
-
-                let app2 = app.clone();
-                let id2 = display.id.clone();
-                window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                        let quitting = app2
-                            .state::<AppState>()
-                            .runtime
-                            .lock()
-                            .map(|runtime| runtime.quitting)
-                            .unwrap_or(false);
-                        if quitting {
-                            return;
-                        }
-                        api.prevent_close();
-                        stop_screensaver(&app2, &id2);
+                        .map(|runtime| runtime.quitting)
+                        .unwrap_or(false);
+                    if quitting {
+                        return;
                     }
-                });
+                    api.prevent_close();
+                    stop_screensaver(&app2, &id2);
+                }
+            });
 
-                write_log(
-                    app,
-                    format!("Display to use: {} (id {})", display.label, display.id),
-                );
-            }
-            Err(err) => {
-                write_log(
-                    app,
-                    format!("Failed to create window for display {}: {err}", display.id),
-                );
-            }
+            write_log(
+                app,
+                format!("Display to use: {} (id {})", display.label, display.id),
+            );
+            Some(window)
+        }
+        Err(err) => {
+            write_log(
+                app,
+                format!("Failed to create window for display {}: {err}", display.id),
+            );
+            None
         }
     }
 }
@@ -207,17 +227,20 @@ pub fn build_options(app: &AppHandle, display: &DisplayInfo) -> Value {
     let ui_theme = store.get_str("ui_theme").unwrap_or_else(|| "auto".into());
     let ui_theme = if ui_theme == "auto" { theme } else { ui_theme };
     let close_title = state.i18n.lock().unwrap().t("close");
-    let stretched = display.id == "stretched";
-    let glass_background = if background_mode == "glass" {
-        state
-            .runtime
-            .lock()
-            .unwrap()
-            .glass_backgrounds
-            .get(&display.id)
-            .cloned()
-    } else {
-        None
+    let stretched = display.stretched;
+    let (stretch_epoch_ms, glass_background) = {
+        let runtime = state.runtime.lock().unwrap();
+        let epoch = if stretched {
+            runtime.stretch_epoch_ms
+        } else {
+            0
+        };
+        let background = if background_mode == "glass" {
+            runtime.glass_backgrounds.get(&display.id).cloned()
+        } else {
+            None
+        };
+        (epoch, background)
     };
 
     json!({
@@ -248,11 +271,16 @@ pub fn build_options(app: &AppHandle, display: &DisplayInfo) -> Value {
         "singleColor": store.get("singleColor").cloned().unwrap_or(Value::Bool(false)),
         "locale": store.get_str("locale").unwrap_or_else(|| "en".into()),
         "datetime_front": store.get_bool_or("datetime_front", false),
-        "show_datetime": store.get_bool_or("show_datetime", false),
+        "show_datetime": store.get_bool_or("show_datetime", false)
+            && (!stretched || display.stretched_primary),
         "randomize_datetime_pos": stretched || store.get_bool_or("randomize_datetime_pos", false),
         "datetime_pos": store.get_str("datetime_pos").unwrap_or_else(|| "center".into()),
         "display_bounds": display.bounds,
         "src_bounds": display.src_bounds.clone().map(|b| json!(b)).unwrap_or(Value::Null),
+        "stretched": stretched,
+        "scene_bounds": display.scene_bounds,
+        "stretch_epoch_ms": stretch_epoch_ms,
+        "stretch_seed": stretch_epoch_ms % 2_147_483_647,
     })
 }
 
@@ -268,11 +296,6 @@ fn apply_physical_bounds(window: &tauri::WebviewWindow, display: &DisplayInfo) {
 }
 
 fn enter_fullscreen(window: &tauri::WebviewWindow, display: &DisplayInfo) {
-    if display.id == "stretched" {
-        apply_physical_bounds(window, display);
-        return;
-    }
-
     #[cfg(target_os = "macos")]
     {
         // Native fullscreen on macOS creates a new Space and can crash borderless
@@ -317,9 +340,17 @@ pub fn start_screensaver(app: &AppHandle, id: &str, force: bool) {
         return;
     };
     let label = window_label(id);
-    let Some(window) = app.get_webview_window(&label) else {
-        write_log(app, format!("Screensaver window {label} is missing"));
-        return;
+    let window = match app.get_webview_window(&label) {
+        Some(window) => window,
+        None => {
+            // The display can be newly selected at runtime. Create its window
+            // on demand instead of dropping the start request.
+            let Some(window) = create_screensaver_window(app, &display) else {
+                write_log(app, format!("Screensaver window {label} is missing"));
+                return;
+            };
+            window
+        }
     };
 
     let first_display = {
@@ -332,6 +363,14 @@ pub fn start_screensaver(app: &AppHandle, id: &str, force: bool) {
 
     {
         let mut runtime = state.runtime.lock().unwrap();
+        // The selected-display set can change while the monitor loop is
+        // starting a screen. Do not start a display that was just deselected.
+        if !runtime.displays.iter().any(|candidate| candidate.id == id) {
+            return;
+        }
+        if display.stretched && runtime.stretch_epoch_ms == 0 {
+            runtime.stretch_epoch_ms = crate::state::now_ms();
+        }
         let entry = runtime.windows.entry(id.to_string()).or_default();
         entry.running = true;
         entry.paused = false;
@@ -343,7 +382,6 @@ pub fn start_screensaver(app: &AppHandle, id: &str, force: bool) {
     apply_physical_bounds(&window, &display);
 
     let _ = window.set_focusable(true);
-    send_options(app, &display);
     #[cfg(target_os = "macos")]
     write_log(app, format!("macOS: showing screensaver window {label}"));
     let _ = window.show();
@@ -362,6 +400,10 @@ pub fn start_screensaver(app: &AppHandle, id: &str, force: bool) {
     #[cfg(target_os = "macos")]
     write_log(app, format!("macOS: screensaver geometry applied for {id}"));
     present_screensaver_window(&window);
+
+    // Send options only after the window is mapped so the renderer learns the
+    // real surface size instead of laying out at 0x0 while the window is hidden.
+    send_options(app, &display);
 
     let delayed_window = window.clone();
     let delayed_display = display.clone();
@@ -422,7 +464,8 @@ pub fn send_options(app: &AppHandle, display: &DisplayInfo) {
         paused
     };
     let options = build_options(app, display);
-    let _ = window.emit(
+    let _ = window.emit_to(
+        window.label(),
         "send-options",
         json!({ "options": options, "paused": paused }),
     );
@@ -456,10 +499,10 @@ pub fn stop_screensaver(app: &AppHandle, id: &str) {
     if let Some(window) = app.get_webview_window(&label) {
         if window.is_visible().unwrap_or(false) {
             #[cfg(not(target_os = "macos"))]
-            if id != "stretched" {
+            {
                 let _ = window.set_fullscreen(false);
             }
-            let _ = window.emit("send-stop", true);
+            let _ = window.emit_to(window.label(), "send-stop", true);
             let _ = window.hide();
         }
     }
@@ -473,6 +516,9 @@ pub fn stop_screensaver(app: &AppHandle, id: &str) {
             entry.paused = paused;
             entry.close_allowed_at = 0;
             entry.last_close_sent = 0;
+        }
+        if !runtime.windows.values().any(|window| window.running) {
+            runtime.stretch_epoch_ms = 0;
         }
         paused
     };
@@ -506,7 +552,7 @@ pub fn toggle_screensaver(app: &AppHandle, id: &str) {
     let label = window_label(id);
     if !paused {
         if let Some(window) = app.get_webview_window(&label) {
-            let _ = window.emit("send-pause", ());
+            let _ = window.emit_to(window.label(), "send-pause", ());
         }
         state
             .runtime
@@ -521,7 +567,7 @@ pub fn toggle_screensaver(app: &AppHandle, id: &str) {
         write_log(app, "Screensaver is paused");
     } else {
         if let Some(window) = app.get_webview_window(&label) {
-            let _ = window.emit("send-stop", true);
+            let _ = window.emit_to(window.label(), "send-stop", true);
         }
         start_screensaver(app, id, true);
         write_log(app, "Screensaver is resumed");
@@ -819,7 +865,7 @@ pub fn apply_settings(app: &AppHandle) {
     refresh_screensaver_windows(app);
 
     if let Some(window) = app.get_webview_window("about") {
-        let _ = window.emit("ribbons-i18n-changed", tag);
+        let _ = window.emit_to(window.label(), "ribbons-i18n-changed", tag);
     }
 }
 
@@ -846,39 +892,75 @@ fn update_window_titles(app: &AppHandle) {
 }
 
 fn refresh_screensaver_windows(app: &AppHandle) {
-    let displays = display::collect_displays(app);
-    let signature = display::signature(&displays);
-    let old_ids: Vec<String> = {
-        let state = app.state::<AppState>();
-        let runtime = state.runtime.lock().unwrap();
-        runtime.windows.keys().cloned().collect()
-    };
-    let changed = {
-        let state = app.state::<AppState>();
-        let runtime = state.runtime.lock().unwrap();
-        display::signature(&runtime.displays) != signature
-    };
+    let selected = display::collect_displays(app);
+    let all = display::all_monitors(app);
+    let all_signature = display::signature(&all);
 
-    if !changed {
-        for display in &displays {
-            send_options(app, display);
-        }
+    let topology_changed = {
+        let state = app.state::<AppState>();
+        let runtime = state.runtime.lock().unwrap();
+        !runtime.display_signature.is_empty() && runtime.display_signature != all_signature
+    };
+    if topology_changed {
+        write_log(
+            app,
+            "Display configuration changed. Restarting app to rebuild windows.",
+        );
+        crate::autostart::restart_app(app);
         return;
     }
 
-    stop_all(app);
-    for id in &old_ids {
-        if let Some(window) = app.get_webview_window(&window_label(id)) {
-            let _ = window.destroy();
+    let (old_displays, old_signature) = {
+        let state = app.state::<AppState>();
+        let runtime = state.runtime.lock().unwrap();
+        (
+            runtime.displays.clone(),
+            display::signature(&runtime.displays),
+        )
+    };
+    let new_signature = display::signature(&selected);
+
+    if old_signature != new_signature {
+        // Update the eligible display list first. The monitor loop may be
+        // iterating an older snapshot; resolving by id through runtime.displays
+        // prevents it from re-starting a display that was just deselected.
+        {
+            let state = app.state::<AppState>();
+            let mut runtime = state.runtime.lock().unwrap();
+            runtime.displays = selected.clone();
+            for display in &selected {
+                runtime.windows.entry(display.id.clone()).or_default();
+            }
         }
-    }
-    {
+
+        // Hide windows that are no longer selected, but keep them around so
+        // re-selecting a display never races with an asynchronous window
+        // destroy (which used to leave "window ... is missing").
+        for old in &old_displays {
+            if !selected.iter().any(|display| display.id == old.id) {
+                stop_screensaver(app, &old.id);
+            }
+        }
+
+        // Newly selected displays may not have a window yet.
+        for display in &selected {
+            create_screensaver_window(app, display);
+        }
+
+        write_log(app, "Selected displays changed");
+        tray::rebuild_menu(app);
+    } else {
         let state = app.state::<AppState>();
         let mut runtime = state.runtime.lock().unwrap();
-        runtime.windows.clear();
-        runtime.displays.clear();
+        runtime.displays = selected.clone();
+        for display in &selected {
+            runtime.windows.entry(display.id.clone()).or_default();
+        }
     }
-    create_screensaver_windows(app);
+
+    for display in &selected {
+        send_options(app, display);
+    }
 }
 
 pub fn settings_snapshot(app: &AppHandle) -> Value {

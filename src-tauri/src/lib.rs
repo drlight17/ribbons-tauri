@@ -8,6 +8,8 @@ mod glass;
 mod hid;
 mod i18n;
 mod idle;
+#[cfg(target_os = "linux")]
+mod kglobalaccel;
 mod logging;
 mod media;
 mod monitor;
@@ -111,7 +113,6 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     {
         app.set_activation_policy(tauri::ActivationPolicy::Accessory);
     }
-
     #[cfg(target_os = "linux")]
     check_linux_runtime(&handle);
 
@@ -226,17 +227,24 @@ fn check_reduce_transparency(app: &AppHandle) {
 }
 
 fn register_shortcuts(app: &AppHandle) {
+    #[cfg(target_os = "linux")]
+    if autostart::is_kde() {
+        let (pause, restart) = {
+            let state = app.state::<AppState>();
+            let i18n = state.i18n.lock().unwrap();
+            (i18n.t("pause"), i18n.t("restart_app"))
+        };
+        crate::kglobalaccel::start(app.clone(), pause, restart);
+        return;
+    }
+
+    register_plugin_shortcuts(app);
+}
+
+pub(crate) fn register_plugin_shortcuts(app: &AppHandle) {
     use tauri_plugin_global_shortcut::{
         Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState,
     };
-
-    if autostart::is_kde_plasma5() {
-        logging::write_log(
-            app,
-            "Skip globalShortcut registration in old KDE Plasma 5 to prevent GUI issues",
-        );
-        return;
-    }
 
     let pause = Shortcut::new(Some(Modifiers::CONTROL), Code::KeyP);
     if let Err(err) = app
@@ -248,6 +256,8 @@ fn register_shortcuts(app: &AppHandle) {
         })
     {
         logging::write_log(app, format!("Failed to register Ctrl+P: {err}"));
+    } else {
+        logging::write_log(app, "Ctrl+P registered via Tauri global shortcut plugin");
     }
 
     let restart = Shortcut::new(Some(Modifiers::ALT | Modifiers::SHIFT), Code::Escape);
@@ -261,9 +271,13 @@ fn register_shortcuts(app: &AppHandle) {
         })
     {
         logging::write_log(app, format!("Failed to register Alt+Shift+Escape: {err}"));
+    } else {
+        logging::write_log(
+            app,
+            "Alt+Shift+Escape registered via Tauri global shortcut plugin",
+        );
     }
 }
-
 #[cfg(target_os = "linux")]
 fn command_exists(command: &str) -> bool {
     std::env::var_os("PATH")
@@ -421,22 +435,6 @@ pub fn run() {
         RunEvent::Exit => {
             let state = app.state::<AppState>();
             state.stop_audio();
-            #[cfg(target_os = "linux")]
-            let media_detect = state
-                .store
-                .lock()
-                .map(|store| store.get_bool_or("media_detect", false))
-                .unwrap_or(false);
-            #[cfg(target_os = "linux")]
-            if media_detect {
-                logging::write_log(
-                    app,
-                    "Linux detected. Restarting pipewire to prevent capture process leaks",
-                );
-                let _ = std::process::Command::new("systemctl")
-                    .args(["--user", "restart", "pipewire", "wireplumber"])
-                    .status();
-            }
             logging::write_log(
                 app,
                 format!(

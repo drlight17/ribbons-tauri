@@ -41,6 +41,9 @@ fn monitor_to_display(index: usize, monitor: &tauri::Monitor) -> DisplayInfo {
         bounds,
         physical,
         src_bounds: None,
+        stretched: false,
+        scene_bounds: None,
+        stretched_primary: false,
     }
 }
 
@@ -87,41 +90,40 @@ pub fn collect_displays(app: &AppHandle) -> Vec<DisplayInfo> {
                 )
             },
         );
-        let (pmin_x, pmin_y, pmax_x, pmax_y) = all.iter().fold(
-            (
-                f64::INFINITY,
-                f64::INFINITY,
-                f64::NEG_INFINITY,
-                f64::NEG_INFINITY,
-            ),
-            |(min_x, min_y, max_x, max_y), display| {
-                (
-                    min_x.min(display.physical.x),
-                    min_y.min(display.physical.y),
-                    max_x.max(display.physical.x + display.physical.width),
-                    max_y.max(display.physical.y + display.physical.height),
-                )
-            },
-        );
+        let scene = Bounds {
+            x: min_x,
+            y: min_y,
+            width: max_x - min_x,
+            height: max_y - min_y,
+        };
+        let scene_center_x = scene.x + scene.width / 2.0;
+        let scene_center_y = scene.y + scene.height / 2.0;
+        let mut primary = 0usize;
+        let mut primary_distance = f64::INFINITY;
+        for (index, display) in all.iter().enumerate() {
+            let cx = display.bounds.x + display.bounds.width / 2.0;
+            let cy = display.bounds.y + display.bounds.height / 2.0;
+            let distance = (cx - scene_center_x).powi(2) + (cy - scene_center_y).powi(2);
+            if distance < primary_distance {
+                primary_distance = distance;
+                primary = index;
+            }
+        }
 
-        return vec![DisplayInfo {
-            id: "stretched".to_string(),
-            label: "Stretched".to_string(),
-            index: 0,
-            bounds: Bounds {
-                x: min_x,
-                y: min_y,
-                width: max_x - min_x,
-                height: max_y - min_y,
-            },
-            physical: Bounds {
-                x: pmin_x,
-                y: pmin_y,
-                width: pmax_x - pmin_x,
-                height: pmax_y - pmin_y,
-            },
-            src_bounds: Some(all.iter().map(|d| d.bounds).collect()),
-        }];
+        // One fullscreen window per monitor. Fullscreen is the portable way to
+        // cover panels/taskbars; the renderer draws a slice of the shared
+        // virtual scene in each window and keeps the animation in sync.
+        return all
+            .into_iter()
+            .enumerate()
+            .map(|(index, mut display)| {
+                display.stretched = true;
+                display.scene_bounds = Some(scene);
+                display.src_bounds = None;
+                display.stretched_primary = index == primary;
+                display
+            })
+            .collect();
     }
 
     let existing_ids: Vec<String> = all.iter().map(|d| d.id.clone()).collect();

@@ -90,7 +90,8 @@ mod linux {
                 if let Some(window) =
                     app.get_webview_window(&crate::windows::window_label(&display.id))
                 {
-                    let _ = window.emit(
+                    let _ = window.emit_to(
+                        window.label(),
                         "glass-background",
                         serde_json::json!({ "background": background }),
                     );
@@ -130,15 +131,11 @@ mod linux {
 
         let mut backgrounds = std::collections::HashMap::new();
         for display in &displays {
-            let image = if display.id == "stretched" {
-                desktop.clone()
-            } else {
-                let x = ((display.physical.x - min_x) * scale_x).round() as i64;
-                let y = ((display.physical.y - min_y) * scale_y).round() as i64;
-                let width = (display.physical.width * scale_x).round().max(1.0) as u32;
-                let height = (display.physical.height * scale_y).round().max(1.0) as u32;
-                crop_clamped(&desktop, x, y, width, height)
-            };
+            let x = ((display.physical.x - min_x) * scale_x).round() as i64;
+            let y = ((display.physical.y - min_y) * scale_y).round() as i64;
+            let width = (display.physical.width * scale_x).round().max(1.0) as u32;
+            let height = (display.physical.height * scale_y).round().max(1.0) as u32;
+            let image = crop_clamped(&desktop, x, y, width, height);
 
             if let Some(data_url) = encode_background(image, display.physical.width) {
                 backgrounds.insert(display.id.clone(), data_url);

@@ -11,13 +11,17 @@ use crate::config::APP_NAME_LC;
 use crate::logging::write_log;
 use crate::state::AppState;
 
-pub fn is_kde_plasma5() -> bool {
-    if !cfg!(target_os = "linux") {
-        return false;
+pub fn is_kde() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        std::env::var("XDG_CURRENT_DESKTOP")
+            .map(|desktop| desktop.split(':').any(|part| part == "KDE"))
+            .unwrap_or(false)
     }
-    let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
-    desktop.split(':').any(|part| part == "KDE")
-        && std::env::var("KDE_SESSION_VERSION").as_deref() == Ok("5")
+    #[cfg(not(target_os = "linux"))]
+    {
+        false
+    }
 }
 
 pub fn restart_app(app: &AppHandle) {

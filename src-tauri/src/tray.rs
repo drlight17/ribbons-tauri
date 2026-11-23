@@ -95,7 +95,7 @@ pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let pause = MenuItem::with_id(
         app,
         "pause",
-        format!("⏸  {}", t("pause")),
+        format!("⏸  {}    Ctrl+P", t("pause")),
         pause_enabled,
         None::<&str>,
     )?;
@@ -154,7 +154,7 @@ pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let restart = MenuItem::with_id(
         app,
         "restart",
-        format!("↩️  {}", t("restart_app")),
+        format!("↩️  {}    Alt+Shift+Escape", t("restart_app")),
         true,
         None::<&str>,
     )?;

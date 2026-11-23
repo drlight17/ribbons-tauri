@@ -35,7 +35,7 @@ pub fn renderer_message(
         }
         "ribbons-settings-ready" => {
             let snapshot = crate::windows::settings_snapshot(&app);
-            let _ = window.emit("ribbons-settings-load", snapshot);
+            let _ = window.emit_to(window.label(), "ribbons-settings-load", snapshot);
         }
         "ribbons-settings-save" => {
             save_settings(&app, payload)?;
@@ -186,12 +186,15 @@ fn save_settings(app: &AppHandle, payload: Option<Value>) -> Result<(), String> 
     Ok(())
 }
 
-fn restart_settings_snapshot(store: &config::Store) -> [Option<Value>; 4] {
+fn restart_settings_snapshot(store: &config::Store) -> [Option<Value>; 5] {
     [
         store.get("hw_acc").cloned(),
         store.get("run_at_startup").cloned(),
         store.get("logging").cloned(),
         store.get("randomize_datetime_pos").cloned(),
+        // Stretched mode rebuilds the whole renderer/window layout, so apply
+        // it with a clean start instead of live-updating the running windows.
+        store.get("stretched_mode").cloned(),
     ]
 }
 

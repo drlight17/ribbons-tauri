@@ -24,6 +24,12 @@ pub struct DisplayInfo {
     pub bounds: Bounds,
     pub physical: Bounds,
     pub src_bounds: Option<Vec<Bounds>>,
+    /// This window is one monitor-sized part of a stretched virtual scene.
+    pub stretched: bool,
+    /// Logical bounds of the whole virtual scene for a stretched part.
+    pub scene_bounds: Option<Bounds>,
+    /// Only this stretched part shows the (single) datetime overlay.
+    pub stretched_primary: bool,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -52,6 +58,7 @@ pub struct Runtime {
     pub display_signature: String,
     pub glass_backgrounds: HashMap<String, String>,
     pub glass_capture_in_progress: bool,
+    pub stretch_epoch_ms: u64,
 }
 
 impl Runtime {

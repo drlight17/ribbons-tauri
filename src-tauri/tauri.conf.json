@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Ribbons Screensaver",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "identifier": "com.electron.ribbons-tauri",
   "build": {
     "frontendDist": "../ui"
@@ -57,7 +57,7 @@
       "endpoints": [
         "https://github.com/drlight17/ribbons-tauri/releases/latest/download/latest.json"
       ],
-      "pubkey": "RWS46skHxltvsQ4F/fHmBlGfhwyWgV46S3FY56Ys8f8FmrieuhJXH8GM",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE1RkI3MkEzMTczRTAzNjMKUldSakF6NFhvM0w3cFZpT0FpQm1jR3lpL1k1M3JxNEo1aUNTYXBjZVFSTUMrekVoN3E5Z0V6LzQK",
       "windows": {
         "installMode": "passive"
       }
