@@ -17,7 +17,22 @@ export function send(event, payload) {
 
 export function on(event, handler) {
     if (!hasTauri) return () => {};
-    return tauri.event.listen(event, (message) => handler(message.payload));
+    // Bind listeners to this webview's label. Rust emits most screensaver
+    // events with `emit_to(<label>)`; a listener registered with the default
+    // "any" target would receive every window's copy and the last one wins.
+    let target;
+    try {
+        const meta = window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.metadata;
+        const label = meta && meta.currentWebview && meta.currentWebview.label;
+        target = label ? { kind: 'WebviewWindow', label: label } : undefined;
+    } catch (_) {
+        target = undefined;
+    }
+    return tauri.event.listen(
+        event,
+        (message) => handler(message.payload),
+        target ? { target } : undefined
+    );
 }
 
 export function currentWindow() {

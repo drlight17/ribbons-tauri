@@ -13,8 +13,20 @@ var RibbonsModern = (function () {
     var clamp = function (value, min, max) {
         return Math.max(min, Math.min(max, value));
     };
+    // Deterministic PRNG used when several windows render one stretched scene.
+    // Normal (single-window) mode keeps using a randomly seeded instance.
+    var currentRandom = Math.random;
+    var mulberry32 = function (seed) {
+        var a = seed >>> 0;
+        return function () {
+            a = (a + 0x6D2B79F5) >>> 0;
+            var t = Math.imul(a ^ (a >>> 15), 1 | a);
+            t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+            return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+    };
     var rand = function (min, max) {
-        return min + Math.random() * (max - min);
+        return min + currentRandom() * (max - min);
     };
     // Random mode uses procedural HSL (see _randomTriple) — no fixed palette.
     // Tricolor keeps a small explicit set for white / blue / red parity with classic.
@@ -32,6 +44,15 @@ var RibbonsModern = (function () {
         this._width = 1;
         this._height = 1;
         this._dpr = 1;
+        this._stretch = false;
+        this._sceneWidth = 1;
+        this._sceneHeight = 1;
+        this._offsetX = 0;
+        this._offsetY = 0;
+        this._epochMs = 0;
+        this._seed = 0;
+        this._frame = 0;
+        this._rng = null;
         this._ribbons = [];
         this._raf = null;
         this._lastTs = 0;
@@ -163,6 +184,19 @@ var RibbonsModern = (function () {
             if (this._options.minTwist > this._options.maxTwist) {
                 this._options.maxTwist = this._options.minTwist;
             }
+            this._stretch = !!this._options.stretched;
+            this._offsetX = Number(this._options.offsetX) || 0;
+            this._offsetY = Number(this._options.offsetY) || 0;
+            this._epochMs = Number(this._options.epochMs) || 0;
+            this._seed = Number(this._options.seed) || 0;
+            if (this._stretch) {
+                if (Number(this._options.sceneWidth) > 0) {
+                    this._sceneWidth = Number(this._options.sceneWidth);
+                }
+                if (Number(this._options.sceneHeight) > 0) {
+                    this._sceneHeight = Number(this._options.sceneHeight);
+                }
+            }
         },
         _styleCanvas: function (el, zIndex) {
             el.style.display = "block";
@@ -271,7 +305,7 @@ var RibbonsModern = (function () {
             if (this._lastHue != null) {
                 var delta = ((h - this._lastHue + 540) % 360) - 180;
                 if (Math.abs(delta) < 32) {
-                    h = (this._lastHue + 32 + Math.random() * (360 - 64)) % 360;
+                    h = (this._lastHue + 32 + currentRandom() * (360 - 64)) % 360;
                 }
             }
             this._lastHue = h;
@@ -336,7 +370,7 @@ var RibbonsModern = (function () {
                 if (typeof i === "number" && i >= 0) {
                     index = i % n;
                 } else {
-                    index = Math.floor(Math.random() * n);
+                    index = Math.floor(currentRandom() * n);
                     if (index === this._lastColorIndex) {
                         index = (index + 1) % n;
                     }
@@ -359,7 +393,7 @@ var RibbonsModern = (function () {
             var minTwist = this._options.minTwist;
             var maxTwist = this._options.maxTwist;
             var side = function () {
-                return Math.floor(Math.random() * 4);
+                return Math.floor(currentRandom() * 4);
             };
             var edgePoint = function (s) {
                 var m = rand(0.45, 0.85);
@@ -374,8 +408,8 @@ var RibbonsModern = (function () {
             // Curl / twist in turns (1 = 360°). Direction is random per ribbon.
             var curlTurns = rand(minCurl, maxCurl);
             var twistTurns = rand(minTwist, maxTwist);
-            var curlDir = Math.random() < 0.5 ? 1 : -1;
-            var twistDir = Math.random() < 0.5 ? 1 : -1;
+            var curlDir = currentRandom() < 0.5 ? 1 : -1;
+            var twistDir = currentRandom() < 0.5 ? 1 : -1;
             var curlHarmonic = 2.0;
             var curlHarmonicMix = rand(0.05, 0.15);
             var baseAmp = this._options.curlAmplitude * rand(0.75, 1.05);
@@ -386,9 +420,9 @@ var RibbonsModern = (function () {
                 : 0;
             var spread = 0.35 + 0.3 * clamp(curlTurns, 0, 2);
             return {
-                id: Math.random(),
+                id: currentRandom(),
                 depthTime: rand(0, Math.PI * 2),
-                drawOrder: Math.random(),
+                drawOrder: currentRandom(),
                 width: rand(minW, maxW),
                 life: rand(26, 39) * rand(0.72, 1.28),
                 lengthFactor: rand(0.55, 1),
@@ -417,6 +451,12 @@ var RibbonsModern = (function () {
         reset: function () {
             var n = this._options.ribbonCount;
             var i;
+            var seed = this._stretch
+                ? this._seed
+                : (Math.random() * 0x7fffffff) | 0;
+            this._rng = mulberry32(seed);
+            currentRandom = this._rng;
+            this._frame = 0;
             this._ribbons = [];
             this._lastColorIndex = -1;
             this._lastHue = null;
@@ -442,6 +482,20 @@ var RibbonsModern = (function () {
             var changed = Math.abs(nw - this._width) > 0.5 || Math.abs(nh - this._height) > 0.5;
             this._width = nw;
             this._height = nh;
+            var sceneChanged = false;
+            if (this._stretch) {
+                // The virtual scene is shared by all monitors and must not
+                // change when one window is resized.
+                if (this._sceneWidth <= 1 || this._sceneHeight <= 1) {
+                    this._sceneWidth = Math.max(1, Number(this._options.sceneWidth) || nw);
+                    this._sceneHeight = Math.max(1, Number(this._options.sceneHeight) || nh);
+                }
+            } else {
+                sceneChanged = Math.abs(nw - this._sceneWidth) > 0.5 ||
+                    Math.abs(nh - this._sceneHeight) > 0.5;
+                this._sceneWidth = nw;
+                this._sceneHeight = nh;
+            }
             this._dpr = Math.min(window.devicePixelRatio || 1, 2);
             var cw = Math.round(this._width * this._dpr);
             var ch = Math.round(this._height * this._dpr);
@@ -457,7 +511,7 @@ var RibbonsModern = (function () {
                     this._bgContext.setTransform(this._dpr, 0, 0, this._dpr, 0, 0);
                 }
             }
-            if (changed && this._ribbons.length) {
+            if ((!this._stretch && (changed || sceneChanged)) && this._ribbons.length) {
                 this.reset();
             }
             this._drawBackground();
@@ -472,16 +526,16 @@ var RibbonsModern = (function () {
          * Reference ≈ single 16:9 panel; wider virtual desktops get compensated spans.
          */
         _aspectSpanScale: function () {
-            var W = Math.max(1, this._width);
-            var H = Math.max(1, this._height);
+            var W = Math.max(1, this._sceneWidth || this._width);
+            var H = Math.max(1, this._sceneHeight || this._height);
             var aspect = W / H;
             var ref = 16 / 9;
             // At 16:9 → 1; at 3×16:9 (triple) → ~0.33 so ribbons stay similar pixel length
             return clamp(ref / aspect, 0.22, 1);
         },
         _point: function (r, u) {
-            var W = this._width;
-            var H = this._height;
+            var W = Math.max(1, this._sceneWidth || this._width);
+            var H = Math.max(1, this._sceneHeight || this._height);
             var v = 1 - u;
             var k = 3 * v * v * u;
             var l = 3 * v * u * u;
@@ -534,8 +588,8 @@ var RibbonsModern = (function () {
             var cx = W * 0.5;
             var cy = H * 0.5;
             return {
-                x: cx + (x - cx) * perspective,
-                y: cy + (y - cy) * perspective,
+                x: cx + (x - cx) * perspective - this._offsetX,
+                y: cy + (y - cy) * perspective - this._offsetY,
                 z: z,
                 persp: perspective,
                 u: u,
@@ -962,45 +1016,73 @@ var RibbonsModern = (function () {
         _drawBackground: function () {
             var ctx = this._bgContext || this._context;
             if (!ctx) return;
-            var W = this._width;
-            var H = this._height;
+            var vw = this._width;
+            var vh = this._height;
             var mode = this._options.backgroundMode;
-            ctx.clearRect(0, 0, W, H);
+            ctx.clearRect(0, 0, vw, vh);
 
             // Transparent / glass — leave canvas fully transparent for glasstron blur
             if (mode === "transparent" || mode === "glass") {
                 return;
             }
 
+            var W = Math.max(1, this._sceneWidth || vw);
+            var H = Math.max(1, this._sceneHeight || vh);
+            var ox = this._stretch ? this._offsetX : 0;
+            var oy = this._stretch ? this._offsetY : 0;
+            var cx = W * 0.5 - ox;
+            var cy = H * 0.48 - oy;
+
             if (mode === "light") {
                 ctx.fillStyle = "#ffffff";
-                ctx.fillRect(0, 0, W, H);
+                ctx.fillRect(0, 0, vw, vh);
             } else if (mode === "dark") {
                 ctx.fillStyle = "#000000";
-                ctx.fillRect(0, 0, W, H);
+                ctx.fillRect(0, 0, vw, vh);
             } else if (mode === "lightGradient") {
                 var bgL = ctx.createRadialGradient(
-                    W * 0.5, H * 0.42, 0,
-                    W * 0.5, H * 0.48, Math.max(W, H) * 0.78
+                    W * 0.5 - ox, H * 0.42 - oy, 0,
+                    cx, cy, Math.max(W, H) * 0.78
                 );
                 bgL.addColorStop(0, "#e9edf4");
                 bgL.addColorStop(0.48, "#c6cfde");
                 bgL.addColorStop(1, "#8998b0");
                 ctx.fillStyle = bgL;
-                ctx.fillRect(0, 0, W, H);
+                ctx.fillRect(0, 0, vw, vh);
             } else if (mode === "darkGradient" || mode === "auto" || !mode) {
                 var bg = ctx.createRadialGradient(
-                    W * 0.5, H * 0.48, 0,
-                    W * 0.5, H * 0.48, Math.max(W, H) * 0.75
+                    cx, cy, 0,
+                    cx, cy, Math.max(W, H) * 0.75
                 );
                 bg.addColorStop(0, "#111b39");
                 bg.addColorStop(0.55, "#080d1c");
                 bg.addColorStop(1, "#03050c");
                 ctx.fillStyle = bg;
-                ctx.fillRect(0, 0, W, H);
+                ctx.fillRect(0, 0, vw, vh);
             } else {
                 ctx.fillStyle = "#000000";
-                ctx.fillRect(0, 0, W, H);
+                ctx.fillRect(0, 0, vw, vh);
+            }
+        },
+        _targetFrame: function () {
+            if (!this._epochMs) return this._frame;
+            return Math.max(0, Math.floor((Date.now() - this._epochMs) / (1000 / 60)));
+        },
+        _step: function (dt) {
+            var speed = this._options.horizontalSpeed;
+            var i;
+            for (i = 0; i < this._ribbons.length; i++) {
+                var ribbon = this._ribbons[i];
+                ribbon.age += dt * 1.7 * speed;
+                // Stop depth wobble once pose is frozen (if option enabled)
+                var pr = ribbon.life > 0 ? ribbon.age / ribbon.life : 1;
+                var freezeOn = this._options.freezeBeforeFade !== false;
+                if (!freezeOn || pr < 0.75) {
+                    ribbon.depthTime += dt * ribbon.depthSpeed * speed;
+                }
+                if (ribbon.age >= ribbon.life) {
+                    this._ribbons[i] = this._makeRibbon(i);
+                }
             }
         },
         _onFrame: function (ts) {
@@ -1009,34 +1091,44 @@ var RibbonsModern = (function () {
             if (typeof window !== "undefined") {
                 window.AnimationId = this._raf;
             }
-            if (!this._lastTs) this._lastTs = ts;
-            var dt = Math.min(0.05, (ts - this._lastTs) / 1000);
-            this._lastTs = ts;
+
+            if (this._stretch && this._epochMs) {
+                // All stretched windows step the same fixed-timestep scene from
+                // the same epoch, so ribbons line up seamlessly across monitors.
+                var target = this._targetFrame();
+                if (this._paused) {
+                    this._frame = target;
+                } else {
+                    var steps = target - this._frame;
+                    if (steps < 0) steps = 0;
+                    if (steps > 600) {
+                        // Recover from a long stall without replaying forever.
+                        this._frame = target - 600;
+                        steps = 600;
+                    }
+                    for (var s = 0; s < steps; s++) {
+                        this._step(1 / 60);
+                        this._frame++;
+                    }
+                }
+            } else {
+                if (!this._lastTs) this._lastTs = ts;
+                var dt = Math.min(0.05, (ts - this._lastTs) / 1000);
+                this._lastTs = ts;
+                if (!this._paused) {
+                    this._step(dt);
+                }
+            }
+
             this._drawBackground();
             // Ribbons layer: clear only (keep transparent over datetime)
             if (this._context) {
                 this._context.clearRect(0, 0, this._width, this._height);
             }
-            var speed = this._options.horizontalSpeed;
-            var i;
-            if (!this._paused) {
-                for (i = 0; i < this._ribbons.length; i++) {
-                    var ribbon = this._ribbons[i];
-                    ribbon.age += dt * 1.7 * speed;
-                    // Stop depth wobble once pose is frozen (if option enabled)
-                    var pr = ribbon.life > 0 ? ribbon.age / ribbon.life : 1;
-                    var freezeOn = this._options.freezeBeforeFade !== false;
-                    if (!freezeOn || pr < 0.75) {
-                        ribbon.depthTime += dt * ribbon.depthSpeed * speed;
-                    }
-                    if (ribbon.age >= ribbon.life) {
-                        this._ribbons[i] = this._makeRibbon(i);
-                    }
-                }
-            }
             var sorted = this._ribbons.slice().sort(function (a, b) {
                 return a.drawOrder - b.drawOrder;
             });
+            var i;
             for (i = 0; i < sorted.length; i++) {
                 this._drawRibbon(sorted[i]);
             }
@@ -1052,7 +1144,7 @@ var RibbonsModern = (function () {
         /** Replace one random ribbon */
         spawnNew: function () {
             if (!this._ribbons.length) return;
-            var index = Math.floor(Math.random() * this._ribbons.length);
+            var index = Math.floor(currentRandom() * this._ribbons.length);
             this._ribbons[index] = this._makeRibbon(index);
         },
         /**
@@ -1134,7 +1226,7 @@ var RibbonsModern = (function () {
                     if (curlChanged) {
                         var ct = clamp((r.curlTurns - prevMinCurl) / oldCurlSpan, 0, 1);
                         r.curlTurns = minCurl + ct * (maxCurl - minCurl);
-                        var baseAmp = curlAmpOpt * (0.75 + 0.35 * (r.id || Math.random()));
+                        var baseAmp = curlAmpOpt * (0.75 + 0.35 * (r.id || currentRandom()));
                         // id is random 0..1 — use stable-ish factor from existing curlAmp if present
                         if (typeof r.curlAmp === 'number' && prevCurlAmp > 0) {
                             baseAmp = curlAmpOpt * clamp(r.curlAmp / (prevCurlAmp * 0.9 || 1e-6), 0.6, 1.3);

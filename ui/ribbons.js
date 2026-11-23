@@ -20,6 +20,17 @@ const Ribbons = (function (name, factory) {
     var _w = window,
         _b = document.body,
         _d = document.documentElement;
+    // Deterministic PRNG for multi-window stretched scenes.
+    var currentRandom = Math.random;
+    var mulberry32 = function (seed) {
+        var a = seed >>> 0;
+        return function () {
+            a = (a + 0x6D2B79F5) >>> 0;
+            var t = Math.imul(a ^ (a >>> 15), 1 | a);
+            t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+            return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+    };
     // random helper
     var random = function () {
         if (arguments.length === 1) { // only 1 argument
@@ -31,7 +42,7 @@ const Ribbons = (function (name, factory) {
             return random(0, arguments[0]); // assume numeric
             
         } else if (arguments.length === 2) { // two arguments range
-            return Math.random() * (arguments[1] - arguments[0]) + arguments[0];
+            return currentRandom() * (arguments[1] - arguments[0]) + arguments[0];
         }
         return 0; // default
     };
@@ -127,6 +138,15 @@ const Ribbons = (function (name, factory) {
         this._sto = null;
         this._width = 0;
         this._height = 0;
+        this._stretch = false;
+        this._sceneWidth = 0;
+        this._sceneHeight = 0;
+        this._offsetX = 0;
+        this._offsetY = 0;
+        this._epochMs = 0;
+        this._seed = 0;
+        this._frame = 0;
+        this._rng = null;
         this._scroll = 0;
         this._ribbons = [];
         this._saved_color_index = 0;
@@ -211,6 +231,20 @@ const Ribbons = (function (name, factory) {
             var t = (mult - 0.3) / (3 - 0.3);
             if (this._options.delay == null) this._options.delay = 6.5 - t * 5;
             if (this._options.phase == null) this._options.phase = 0.005 + t * 0.065;
+
+            this._stretch = !!this._options.stretched;
+            this._offsetX = Number(this._options.offsetX) || 0;
+            this._offsetY = Number(this._options.offsetY) || 0;
+            this._epochMs = Number(this._options.epochMs) || 0;
+            this._seed = Number(this._options.seed) || 0;
+            if (this._stretch) {
+                if (Number(this._options.sceneWidth) > 0) {
+                    this._sceneWidth = Number(this._options.sceneWidth);
+                }
+                if (Number(this._options.sceneHeight) > 0) {
+                    this._sceneHeight = Number(this._options.sceneHeight);
+                }
+            }
         },
         _styleLayer: function (el, zIndex) {
             el.style.display = "block";
@@ -236,49 +270,62 @@ const Ribbons = (function (name, factory) {
         _drawBackground: function () {
             var ctx = this._bgContext;
             if (!ctx) return;
-            var W = this._width;
-            var H = this._height;
+            var vw = this._width;
+            var vh = this._height;
             var mode = this._options.backgroundMode || "dark";
 
-            ctx.clearRect(0, 0, W, H);
+            ctx.clearRect(0, 0, vw, vh);
 
             // Transparent — leave canvas fully clear for glasstron / acrylic blur
             if (mode === "transparent" || mode === "glass" ) {
                 return;
             }
 
+            var W = Math.max(1, this._sceneWidth || vw);
+            var H = Math.max(1, this._sceneHeight || vh);
+            var ox = this._stretch ? this._offsetX : 0;
+            var oy = this._stretch ? this._offsetY : 0;
+            var cx = W * 0.5 - ox;
+            var cy = H * 0.48 - oy;
+
             if (mode === "light") {
                 ctx.fillStyle = "#ffffff";
-                ctx.fillRect(0, 0, W, H);
+                ctx.fillRect(0, 0, vw, vh);
             } else if (mode === "lightGradient") {
                 var bgL = ctx.createRadialGradient(
-                    W * 0.5, H * 0.42, 0,
-                    W * 0.5, H * 0.48, Math.max(W, H) * 0.78
+                    W * 0.5 - ox, H * 0.42 - oy, 0,
+                    cx, cy, Math.max(W, H) * 0.78
                 );
                 bgL.addColorStop(0, "#e9edf4");
                 bgL.addColorStop(0.48, "#c6cfde");
                 bgL.addColorStop(1, "#8998b0");
                 ctx.fillStyle = bgL;
-                ctx.fillRect(0, 0, W, H);
+                ctx.fillRect(0, 0, vw, vh);
             } else if (mode === "darkGradient") {
                 var bg = ctx.createRadialGradient(
-                    W * 0.5, H * 0.48, 0,
-                    W * 0.5, H * 0.48, Math.max(W, H) * 0.75
+                    cx, cy, 0,
+                    cx, cy, Math.max(W, H) * 0.75
                 );
                 bg.addColorStop(0, "#111b39");
                 bg.addColorStop(0.55, "#080d1c");
                 bg.addColorStop(1, "#03050c");
                 ctx.fillStyle = bg;
-                ctx.fillRect(0, 0, W, H);
+                ctx.fillRect(0, 0, vw, vh);
             } else {
                 // "dark" and any unknown value
                 ctx.fillStyle = "#000000";
-                ctx.fillRect(0, 0, W, H);
+                ctx.fillRect(0, 0, vw, vh);
             }
         },
         // Initialize the ribbons effect
         init: function () {
             try {
+                var seed = this._stretch
+                    ? this._seed
+                    : (Math.random() * 0x7fffffff) | 0;
+                this._rng = mulberry32(seed);
+                currentRandom = this._rng;
+                this._frame = 0;
                 // bg below datetime (-1); ribbons above datetime
                 this._bgCanvas = document.createElement("canvas");
                 this._bgCanvas.className = "ribbons-bg-canvas";
@@ -307,23 +354,25 @@ const Ribbons = (function (name, factory) {
             if (this._options.singleColor === 667 ) {
                 this._options.ribbonCount = 3;
             }
+            var sceneW = Math.max(1, this._sceneWidth || this._width);
+            var sceneH = Math.max(1, this._sceneHeight || this._height);
             // movement data
             var dir = (Math.round(random(1, 9)) > 5) ? "right" : "left",
                 stop = 1000,
                 hide = 400,
                 min = 0 - hide,
-                max = this._width + hide,
+                max = sceneW + hide,
                 movex = 0,
                 movey = 0,
                 startx = (dir === "right") ? min : max,
-                starty = Math.round(random(0, this._height));
+                starty = Math.round(random(0, sceneH));
             // asjust starty based on options
             if (/^(top|min)$/i.test(this._options.verticalPosition)) {
                 starty = 0 + hide;
             } else if (/^(middle|center)$/i.test(this._options.verticalPosition)) {
-                starty = (this._height / 2);
+                starty = (sceneH / 2);
             } else if (/^(bottom|max)$/i.test(this._options.verticalPosition)) {
-                starty = this._height - hide;
+                starty = sceneH - hide;
             }
             // ribbon sections data
             // tricolor
@@ -343,13 +392,13 @@ const Ribbons = (function (name, factory) {
                 point2 = new Point(startx, starty),
                 point3 = null,
                 // randomize delay between each ribbon appearance
-                delay = Math.random() * 4;
+                delay = currentRandom() * 4;
             // buils ribbon sections
             while (true) {
                 if (stop <= 0) break;
                 stop--;
-                movex = Math.round((Math.random() * 1 - 0.2) * this._options.horizontalSpeed);
-                movey = Math.round((Math.random() * 1 - 0.5) * (this._height * 0.35));
+                movex = Math.round((currentRandom() * 1 - 0.2) * this._options.horizontalSpeed);
+                movey = Math.round((currentRandom() * 1 - 0.5) * (sceneH * 0.35));
                 point3 = new Point();
                 point3.copy(point2);
                 if (dir === "right") {
@@ -381,81 +430,84 @@ const Ribbons = (function (name, factory) {
             }
             this._ribbons.push(ribbon);
         },
-        _drawRibbonSection: function (section) {
-            if (section) {
-                if (section.phase >= 1 && section.alpha <= 0) {
-                    return true; // done
-                }
-                if (section.delay <= 0) {
-                    section.phase += this._options.phase;
-                    section.alpha = Math.sin(section.phase) * 1;
-                    section.alpha = (section.alpha <= 0) ? 0 : section.alpha;
-                    section.alpha = (section.alpha >= 1) ? 1 : section.alpha;
-                    if (this._options.animateSections) {
-                        var mod = (Math.sin(1 + section.phase * Math.PI / 2) * 0.1);
-                        if (section.dir === "right") {
-                            section.point1.add(mod, 0);
-                            section.point2.add(mod, 0);
-                            section.point3.add(mod, 0);
-                        } else {
-                            section.point1.subtract(mod, 0);
-                            section.point2.subtract(mod, 0);
-                            section.point3.subtract(mod, 0);
-                        }
-                        section.point1.add(0, mod);
-                        section.point2.add(0, mod);
-                        section.point3.add(0, mod);
+        _updateSection: function (section) {
+            if (!section) return true;
+            if (section.phase >= 1 && section.alpha <= 0) {
+                return true; // done
+            }
+            if (section.delay <= 0) {
+                section.phase += this._options.phase;
+                section.alpha = Math.sin(section.phase) * 1;
+                section.alpha = (section.alpha <= 0) ? 0 : section.alpha;
+                section.alpha = (section.alpha >= 1) ? 1 : section.alpha;
+                if (this._options.animateSections) {
+                    var mod = (Math.sin(1 + section.phase * Math.PI / 2) * 0.1);
+                    if (section.dir === "right") {
+                        section.point1.add(mod, 0);
+                        section.point2.add(mod, 0);
+                        section.point3.add(mod, 0);
+                    } else {
+                        section.point1.subtract(mod, 0);
+                        section.point2.subtract(mod, 0);
+                        section.point3.subtract(mod, 0);
                     }
-                } else {
-                    // affects ribbon dissapear speed
-                    section.delay -= 0.5;
+                    section.point1.add(0, mod);
+                    section.point2.add(0, mod);
+                    section.point3.add(0, mod);
                 }
-                
-                if (section.color === 667) {
-                    var s = "0%";
-                    var l = "100%"  
-                } else {
-                    var s = this._options.colorSaturation;
-                    var l = this._options.colorBrightness;
-                }
-                var c = "hsla(" + section.color + ", " + s + ", " + l + ", " + section.alpha + " )";
-                this._context.save();
-                if (this._options.parallaxAmount !== 0) {
-                    this._context.translate(0, this._scroll * this._options.parallaxAmount);
-                }
-                this._context.beginPath();
-                this._context.moveTo(section.point1.x, section.point1.y);
-                this._context.lineTo(section.point2.x, section.point2.y);
-                this._context.lineTo(section.point3.x, section.point3.y);
-                // set blur
-                this._context.shadowBlur = this._options.glow;
-                this._context.shadowColor = c;
-                this._context.fillStyle = c;
-                this._context.fill();
-                if (this._options.strokeSize > 0) {
-                    this._context.lineWidth = this._options.strokeSize;
-                    this._context.strokeStyle = c;
-                    this._context.lineCap = "round";
-                    this._context.stroke();
-                }
-                this._context.restore();
+            } else {
+                // affects ribbon dissapear speed
+                section.delay -= 0.5;
             }
             return false; // not done yet
         },
-        // Draw ribbons
-        _onDraw: function () {
-            if (this._destroyed) return;
-            for (var i = 0; i < this._ribbons.length; ++i) {                
+        _drawSection: function (section) {
+            if (!section || section.alpha <= 0) return;
+            var s;
+            var l;
+            if (section.color === 667) {
+                s = "0%";
+                l = "100%";
+            } else {
+                s = this._options.colorSaturation;
+                l = this._options.colorBrightness;
+            }
+            var c = "hsla(" + section.color + ", " + s + ", " + l + ", " + section.alpha + " )";
+            this._context.save();
+            if (this._options.parallaxAmount !== 0) {
+                this._context.translate(0, this._scroll * this._options.parallaxAmount);
+            }
+            this._context.beginPath();
+            var ox = this._stretch ? this._offsetX : 0;
+            var oy = this._stretch ? this._offsetY : 0;
+            this._context.moveTo(section.point1.x - ox, section.point1.y - oy);
+            this._context.lineTo(section.point2.x - ox, section.point2.y - oy);
+            this._context.lineTo(section.point3.x - ox, section.point3.y - oy);
+            // set blur
+            this._context.shadowBlur = this._options.glow;
+            this._context.shadowColor = c;
+            this._context.fillStyle = c;
+            this._context.fill();
+            if (this._options.strokeSize > 0) {
+                this._context.lineWidth = this._options.strokeSize;
+                this._context.strokeStyle = c;
+                this._context.lineCap = "round";
+                this._context.stroke();
+            }
+            this._context.restore();
+        },
+        _targetFrame: function () {
+            if (!this._epochMs) return this._frame;
+            return Math.max(0, Math.floor((Date.now() - this._epochMs) / (1000 / 60)));
+        },
+        _step: function () {
+            var i;
+            for (i = 0; i < this._ribbons.length; ++i) {
                 if (!this._ribbons[i]) {
                     this._ribbons.splice(i, 1);
                     i--;
                 }
             }
-            if (!this._context || !this._canvas) return;
-            
-            this._drawBackground();
-            this._context.clearRect(0, 0, this._width, this._height);
-            
             for (var a = 0; a < this._ribbons.length; ++a) {
                 var ribbon = this._ribbons[a];
                 if (!ribbon || !Array.isArray(ribbon) || ribbon.length === 0) {
@@ -465,7 +517,7 @@ const Ribbons = (function (name, factory) {
                 var numSections = ribbon.length;
                 var numDone = 0;
                 for (var b = 0; b < numSections; ++b) {
-                    if (this._drawRibbonSection(ribbon[b])) {
+                    if (this._updateSection(ribbon[b])) {
                         numDone++;
                     }
                 }
@@ -473,9 +525,54 @@ const Ribbons = (function (name, factory) {
                     this._ribbons[a] = null;
                 }
             }
+            for (i = this._ribbons.length - 1; i >= 0; --i) {
+                if (!this._ribbons[i]) {
+                    this._ribbons.splice(i, 1);
+                }
+            }
             while (this._ribbons.length < this._options.ribbonCount) {
                 this.addRibbon();
             }
+        },
+        _draw: function () {
+            if (!this._context || !this._canvas) return;
+            this._drawBackground();
+            this._context.clearRect(0, 0, this._width, this._height);
+            for (var a = 0; a < this._ribbons.length; ++a) {
+                var ribbon = this._ribbons[a];
+                if (!ribbon || !Array.isArray(ribbon)) continue;
+                for (var b = 0; b < ribbon.length; ++b) {
+                    this._drawSection(ribbon[b]);
+                }
+            }
+        },
+        // Draw ribbons
+        _onDraw: function () {
+            if (this._destroyed) return;
+            if (!this._context || !this._canvas) {
+                var raf0 = requestAnimationFrame(this._onDraw);
+                this._raf = raf0;
+                return;
+            }
+
+            if (this._stretch && this._epochMs) {
+                var target = this._targetFrame();
+                var steps = target - this._frame;
+                if (steps < 0) steps = 0;
+                if (steps > 600) {
+                    this._frame = target - 600;
+                    steps = 600;
+                }
+                for (var s = 0; s < steps; s++) {
+                    this._step();
+                    this._frame++;
+                }
+            } else {
+                this._step();
+            }
+
+            this._draw();
+
             // Reuse pre-bound _onDraw (constructor) — do NOT .bind() every frame
             var raf = requestAnimationFrame(this._onDraw);
             this._raf = raf;
@@ -492,6 +589,15 @@ const Ribbons = (function (name, factory) {
             var screen = screenInfo(e);
             this._width = screen.width;
             this._height = screen.height;
+            if (this._stretch) {
+                if (this._sceneWidth <= 1 || this._sceneHeight <= 1) {
+                    this._sceneWidth = Math.max(1, Number(this._options.sceneWidth) || this._width);
+                    this._sceneHeight = Math.max(1, Number(this._options.sceneHeight) || this._height);
+                }
+            } else {
+                this._sceneWidth = this._width;
+                this._sceneHeight = this._height;
+            }
             if (this._canvas) {
                 this._canvas.width = this._width;
                 this._canvas.height = this._height;

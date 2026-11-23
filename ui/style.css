@@ -40,35 +40,45 @@ canvas {
 }
 button {
     position: absolute;
-    background-color: gray;
-    opacity: .3;
-    filter: grayscale(100%) contrast(20);
+    background-color: rgba(110, 110, 110, 0.85);
+    color: #fff;
+    opacity: 1;
     border-radius: 50%;
     padding: 15px;
     outline: none;
     cursor: pointer;
     border: none;
+    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.22), 0 0 14px rgba(0, 0, 0, 0.4);
     transition: opacity .5s ease-in-out;
     z-index: 10;
     /*backdrop-filter: blur(30px);*/
 }
 
-#close-button {
+/* Both the original button and the per-monitor clones need the same
+ * centering and icon colour. WebKitGTK does not inherit the #close-button
+ * rule into cloned buttons, which used to leave the cross invisible. */
+#close-button,
+.close-button-extra {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #111;
+  color: #fff;
 }
 #close-button svg,
 .close-button-extra svg {
   width: 100%;
   height: 100%;
   display: block;
+  fill: currentColor;
+}
+#close-button svg path,
+.close-button-extra svg path {
+  fill: currentColor;
 }
 
-.dark button {
-    filter: grayscale(100%) invert(1) contrast(20);
-}
+/* Avoid the old grayscale/contrast filter chain: on WebKitGTK (Ubuntu 24 /
+ * Plasma 5) it could make the circle and the cross the same colour, or skip
+ * painting the icon entirely. The plain colours above are theme-neutral. */
 button:hover {
     opacity: .8;
     transition: opacity .5s ease-in-out;

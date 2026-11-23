@@ -36,8 +36,9 @@ function bindCloseClick(btn) {
 /**
  * Place a close button at the center of every physical monitor.
  * Matches style.css: top/right 50% + translate for single display.
- * In stretched mode one BrowserWindow spans all displays — clone a
- * centered button into each src_bounds region.
+ * In older single-window stretched builds src_bounds held all monitor
+ * regions; current builds create one fullscreen window per monitor, so the
+ * CSS-centered branch below is used.
  */
 function setupCloseButtons(opts) {
     document.querySelectorAll('.close-button-extra').forEach((el) => el.remove());
@@ -178,9 +179,27 @@ function applyGlassBackground(theme, background) {
     }
 }
 
+function stretchOptions(got) {
+    var scene = got && got.scene_bounds;
+    var view = got && got.display_bounds;
+    var sync = !!(got && got.stretched && scene && view &&
+        scene.width > 0 && scene.height > 0 &&
+        view.width > 0 && view.height > 0);
+    return {
+        stretched: sync,
+        sceneWidth: sync ? scene.width : null,
+        sceneHeight: sync ? scene.height : null,
+        offsetX: sync ? view.x - scene.x : 0,
+        offsetY: sync ? view.y - scene.y : 0,
+        epochMs: sync ? (got.stretch_epoch_ms || 0) : 0,
+        seed: sync ? (got.stretch_seed || 0) : 0
+    };
+}
+
 function start_Ribbons(colorSaturation, colorCycleSpeed, options) {
     stop_Ribbons();
     engine = 'classic';
+    var sync = stretchOptions(options);
     // Classic ribbons.js uses _options.glow for ctx.shadowBlur
     var classicBlur = options["ribbonBlur"] != null ? options["ribbonBlur"]
       : (options["glow"] != null ? options["glow"] : 30);
@@ -200,7 +219,14 @@ function start_Ribbons(colorSaturation, colorCycleSpeed, options) {
         glow: classicBlur,
         singleColor: options["singleColor"],
         // Canvas-painted background (same modes as modern)
-        backgroundMode: options["backgroundMode"] || "darkGradient"
+        backgroundMode: options["backgroundMode"] || "darkGradient",
+        stretched: sync.stretched,
+        sceneWidth: sync.sceneWidth,
+        sceneHeight: sync.sceneHeight,
+        offsetX: sync.offsetX,
+        offsetY: sync.offsetY,
+        epochMs: sync.epochMs,
+        seed: sync.seed
     });
 }
 
@@ -254,6 +280,7 @@ function mapModernOptions(got) {
     }
    
     var bg = got.backgroundMode || "darkGradient";
+    var sync = stretchOptions(got);
     return {
         mode: mode,
         singleColor: singleColor,
@@ -276,6 +303,13 @@ function mapModernOptions(got) {
         curlAmplitude: got.curlAmplitude != null ? got.curlAmplitude : 0.22,
         endless: !!got.endless,
         freezeBeforeFade: got.freezeBeforeFade !== false,
+        stretched: sync.stretched,
+        sceneWidth: sync.sceneWidth,
+        sceneHeight: sync.sceneHeight,
+        offsetX: sync.offsetX,
+        offsetY: sync.offsetY,
+        epochMs: sync.epochMs,
+        seed: sync.seed,
         zIndex: -1
     };
 }

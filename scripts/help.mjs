@@ -14,14 +14,14 @@ Development:
 
 Production bundles:
   npm run build              # platform default bundles
-  npm run build-deb          # Debian/Ubuntu
-  npm run build-rpm          # Fedora/RHEL
+  npm run build-deb          # Debian/Ubuntu (not update-blocked)
+  npm run build-rpm          # Fedora/RHEL (not update-blocked)
   npm run build-AppImage     # portable Linux AppImage (not update-blocked)
   npm run build-targz        # raw binary tar.gz
   npm run build-exe          # Windows NSIS installer
   npm run build-msi          # Windows MSI
   npm run build-zip          # Windows portable zip
-  npm run build-dmg          # macOS DMG
+  npm run build-dmg          # macOS DMG (not update-blocked)
   npm run build-zip-mac      # macOS .app zip
   npm run build-linux        # all Linux formats
   npm run build-win          # zip + msi + nsis
@@ -30,6 +30,7 @@ Production bundles:
 Update blocking:
   npm run block              # creates UPDATE_BLOCK before a build
   npm run unblock            # removes it again
+  (deb, rpm and dmg builds are not update-blocked)
 
 Linux system packages (Arch/CachyOS):
   sudo pacman -S --needed base-devel webkit2gtk-4.1 libayatana-appindicator \
