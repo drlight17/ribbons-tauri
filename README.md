@@ -71,6 +71,10 @@ npm run build      # platform bundles
 npm run help       # all build commands and paths
 ```
 
+On Linux the build helpers run Tauri through `fakeroot` when available. This
+makes `.deb` archives use root-owned entries; without it, users with UID/GID
+values longer than six digits can produce a corrupt package header.
+
 Build helpers from the original project are still available:
 
 ```bash
@@ -86,10 +90,13 @@ npm run build-dmg
 npm run build-zip-mac
 npm run build-linux   # rpm + deb + tar.gz + AppImage
 npm run build-win     # zip + msi + nsis
-npm run build-mac     # dmg + zip
+npm run build-mac     # dmg + zip for x86_64 and arm64
+npm run build-mac -- --universal   # one universal dmg + zip
 ```
 
-`npm run block` creates `UPDATE_BLOCK` before a build; `npm run unblock` removes it.
+`build-mac` runs on either Intel or Apple Silicon macOS, installs the required Rust targets, and produces signed x86_64 and arm64 artifacts in `src-tauri/target/<target>/release/{bundle,}`. `latest.json` and `latest-mac.json` then contain both `darwin-x86_64` and `darwin-aarch64`. Use `--universal` for a single universal build instead.
+
+`npm run block` creates `UPDATE_BLOCK` before a build; `npm run unblock` removes it. The deb and rpm helpers block self-updates because Tauri’s updater only supports AppImage on Linux; deb/rpm installations should update through the OS package manager. As an extra safeguard, packaged Linux builds only enable self-update when running as an AppImage (`APPIMAGE` is set). The dmg helper does not block self-updates.
 
 ### Updater signing
 
@@ -98,7 +105,18 @@ Tauri verifies update artifacts. The repository ships a placeholder key so devel
 1. Generate a key pair with `npx @tauri-apps/cli signer generate`.
 2. Replace `plugins.updater.pubkey` in `src-tauri/tauri.conf.json`.
 3. Set `TAURI_SIGNING_PRIVATE_KEY` (or `TAURI_SIGNING_PRIVATE_KEY_PATH`) (and its password `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`) when building.
-4. Publish `latest.json` and signed artifacts with each GitHub release.
+4. Build on each OS. Each build writes a per-platform manifest that contains both its updater `platforms` entries and the full list of signed bundles:
+   - `latest-linux.json` — AppImage, deb and rpm
+   - `latest-win.json` — MSI and NSIS installer
+   - `latest-mac.json` — app updater archive and signed DMG
+5. Copy those three files into one checkout (the repository root) and merge them into a single updater manifest:
+   ```bash
+   npm run merge-latest
+   # or: node scripts/merge-latest.mjs latest-linux.json latest-win.json latest-mac.json -o latest.json
+   ```
+6. Upload the merged `latest.json` together with every signed artifact it references. The per-platform `latest-*.json` files are optional release assets; the updater only reads `latest.json`.
+
+The merged `latest.json` keeps the updater `platforms` map (one preferred artifact per OS/arch, e.g. AppImage on Linux) and also contains a `bundles` array with every signed bundle, including deb and rpm. Tauri’s updater ignores `bundles`; use it for release tooling or manual downloads.
 
 Until then, the version-check dialog still works and the **Yes** button opens the release page.
 

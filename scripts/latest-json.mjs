@@ -141,16 +141,25 @@ function githubAssetName(path) {
 function artifactInfo(path) {
     const name = basename(path);
     if (name.endsWith('.AppImage')) {
-        return { os: 'linux', priority: 10 };
+        return { os: 'linux', kind: 'appimage', priority: 10, updater: true };
+    }
+    if (name.endsWith('.deb')) {
+        return { os: 'linux', kind: 'deb', priority: 6, updater: false };
+    }
+    if (name.endsWith('.rpm')) {
+        return { os: 'linux', kind: 'rpm', priority: 5, updater: false };
     }
     if (name.endsWith('.app.tar.gz')) {
-        return { os: 'darwin', priority: 10 };
+        return { os: 'darwin', kind: 'app', priority: 10, updater: true };
+    }
+    if (name.endsWith('.dmg')) {
+        return { os: 'darwin', kind: 'dmg', priority: 5, updater: false };
     }
     if (name.endsWith('.exe')) {
-        return { os: 'windows', priority: 20 };
+        return { os: 'windows', kind: 'nsis', priority: 20, updater: true };
     }
     if (name.endsWith('.msi')) {
-        return { os: 'windows', priority: 10 };
+        return { os: 'windows', kind: 'msi', priority: 10, updater: true };
     }
     return null;
 }
@@ -169,6 +178,7 @@ const platforms =
     sameVersion && existing.platforms ? { ...existing.platforms } : {};
 
 const candidates = new Map();
+const signedArtifacts = [];
 for (const sigPath of walk(bundleDir)) {
     if (!sigPath.endsWith('.sig')) {
         continue;
@@ -202,6 +212,23 @@ for (const sigPath of walk(bundleDir)) {
     const archs = /universal/i.test(name)
         ? ['x86_64', 'aarch64']
         : [detectedArch || hostArch()];
+    const bundleArch = /universal/i.test(name)
+        ? 'universal'
+        : detectedArch || hostArch();
+
+    signedArtifacts.push({
+        name,
+        artifactPath,
+        sigPath,
+        signature: signature.content,
+        os: info.os,
+        kind: info.kind,
+        arch: bundleArch,
+    });
+
+    if (!info.updater) {
+        continue;
+    }
 
     for (const arch of archs) {
         const platform = `${info.os}-${arch}`;
@@ -217,45 +244,118 @@ for (const sigPath of walk(bundleDir)) {
     }
 }
 
-if (candidates.size === 0) {
-    if (sameVersion && Object.keys(platforms).length > 0) {
+const notes = readNotes(existing);
+const pubDate = new Date().toISOString();
+let wroteMain = false;
+
+if (candidates.size > 0) {
+    for (const [platform, candidate] of [...candidates.entries()].sort(([a], [b]) =>
+        a.localeCompare(b),
+    )) {
+        const url = `${assetBase}/${encodeURIComponent(
+            githubAssetName(candidate.artifactPath),
+        )}`;
+        platforms[platform] = {
+            signature: candidate.signature,
+            url,
+        };
+        console.log(`${platform}: ${basename(candidate.artifactPath)} -> ${url}`);
+    }
+
+    if (Object.keys(platforms).length > 0) {
+        const manifest = {
+            version,
+            notes,
+            pub_date: pubDate,
+            platforms: Object.fromEntries(
+                Object.entries(platforms).sort(([a], [b]) => a.localeCompare(b)),
+            ),
+        };
+
+        writeFileSync(outputPath, `${JSON.stringify(manifest, null, 2)}\n`);
+        console.log(`Wrote ${outputPath} (version ${version})`);
+        wroteMain = true;
+    }
+}
+
+if (!wroteMain) {
+    if (signedArtifacts.length > 0) {
+        console.warn(
+            `No updater-preferred artifacts found in ${bundleDir}; keeping ${outputPath} and writing per-platform manifests.`,
+        );
+    } else if (sameVersion && Object.keys(platforms).length > 0) {
         console.warn(
             `No updater artifacts found in ${bundleDir}; keeping existing ${outputPath}.`,
         );
-        process.exit(0);
+    } else {
+        console.error(
+            `No signed updater artifacts found in ${bundleDir}. Ensure createUpdaterArtifacts is enabled and TAURI_SIGNING_PRIVATE_KEY is set.`,
+        );
+        process.exit(1);
     }
-    console.error(
-        `No signed updater artifacts found in ${bundleDir}. Ensure createUpdaterArtifacts is enabled and TAURI_SIGNING_PRIVATE_KEY is set.`,
-    );
-    process.exit(1);
 }
 
-for (const [platform, candidate] of [...candidates.entries()].sort(([a], [b]) =>
-    a.localeCompare(b),
-)) {
-    const url = `${assetBase}/${encodeURIComponent(
-        githubAssetName(candidate.artifactPath),
-    )}`;
-    platforms[platform] = {
-        signature: candidate.signature,
-        url,
-    };
-    console.log(`${platform}: ${basename(candidate.artifactPath)} -> ${url}`);
-}
-
-if (Object.keys(platforms).length === 0) {
-    console.error('No platform entries could be generated.');
-    process.exit(1);
-}
-
-const manifest = {
-    version,
-    notes: readNotes(existing),
-    pub_date: new Date().toISOString(),
-    platforms: Object.fromEntries(
-        Object.entries(platforms).sort(([a], [b]) => a.localeCompare(b)),
-    ),
+const perOsManifests = {
+    linux: { file: 'latest-linux.json', env: 'LATEST_LINUX_JSON_PATH' },
+    darwin: { file: 'latest-mac.json', env: 'LATEST_MAC_JSON_PATH' },
+    windows: { file: 'latest-win.json', env: 'LATEST_WIN_JSON_PATH' },
 };
+const outputDir = dirname(outputPath);
 
-writeFileSync(outputPath, `${JSON.stringify(manifest, null, 2)}\n`);
-console.log(`Wrote ${outputPath} (version ${version})`);
+for (const [os, config] of Object.entries(perOsManifests)) {
+    const found = signedArtifacts.filter((artifact) => artifact.os === os);
+    if (found.length === 0) {
+        continue;
+    }
+
+    const target = process.env[config.env]
+        ? resolve(root, process.env[config.env])
+        : resolve(outputDir, config.file);
+
+    let previousBundles = [];
+    if (existsSync(target)) {
+        try {
+            const previous = JSON.parse(readFileSync(target, 'utf8'));
+            if (previous.version === version && Array.isArray(previous.bundles)) {
+                previousBundles = previous.bundles;
+            }
+        } catch (err) {
+            console.warn(`Warning: could not read ${target}: ${err.message}`);
+        }
+    }
+
+    const byName = new Map(
+        previousBundles
+            .filter((bundle) => typeof bundle?.name === 'string')
+            .map((bundle) => [bundle.name, bundle]),
+    );
+    for (const artifact of found) {
+        byName.set(artifact.name, {
+            name: artifact.name,
+            kind: artifact.kind,
+            arch: artifact.arch,
+            url: `${assetBase}/${encodeURIComponent(
+                githubAssetName(artifact.artifactPath),
+            )}`,
+            signature: artifact.signature,
+        });
+    }
+
+    const bundles = [...byName.values()].sort((a, b) =>
+        `${a.kind}:${a.name}`.localeCompare(`${b.kind}:${b.name}`),
+    );
+    const osPlatforms = Object.fromEntries(
+        Object.entries(platforms)
+            .filter(([platform]) => platform.startsWith(`${os}-`))
+            .sort(([a], [b]) => a.localeCompare(b)),
+    );
+    const manifest = {
+        version,
+        notes,
+        pub_date: pubDate,
+        platforms: osPlatforms,
+        bundles,
+    };
+    writeFileSync(target, `${JSON.stringify(manifest, null, 2)}\n`);
+    console.log(`Wrote ${target} (${bundles.length} signed bundle(s))`);
+}

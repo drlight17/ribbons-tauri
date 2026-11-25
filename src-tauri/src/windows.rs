@@ -308,11 +308,32 @@ fn enter_fullscreen(window: &tauri::WebviewWindow, display: &DisplayInfo) {
 
     #[cfg(target_os = "linux")]
     {
+        use gtk::gdk::prelude::*;
         use gtk::prelude::*;
 
         if let Ok(gtk_window) = window.gtk_window() {
             if let Some(screen) = gtk::prelude::WidgetExt::screen(&gtk_window) {
-                gtk_window.fullscreen_on_monitor(&screen, display.index as i32);
+                // Tauri and GDK can enumerate monitors in different orders
+                // under X11. Resolve the GDK monitor by geometry instead of
+                // trusting the index, otherwise fullscreen can land on the
+                // wrong output.
+                let mut monitor_index = display.index as i32;
+                let gdk_display = screen.display();
+                for index in 0..gdk_display.n_monitors() {
+                    let Some(monitor) = gdk_display.monitor(index) else {
+                        continue;
+                    };
+                    let geometry = monitor.geometry();
+                    if (geometry.x() as f64 - display.bounds.x).abs() < 1.0
+                        && (geometry.y() as f64 - display.bounds.y).abs() < 1.0
+                        && (geometry.width() as f64 - display.bounds.width).abs() < 1.0
+                        && (geometry.height() as f64 - display.bounds.height).abs() < 1.0
+                    {
+                        monitor_index = index;
+                        break;
+                    }
+                }
+                gtk_window.fullscreen_on_monitor(&screen, monitor_index);
                 return;
             }
         }
@@ -704,6 +725,7 @@ pub fn open_settings(app: &AppHandle) {
         if let Some((x, y)) = center {
             let _ = window.set_position(tauri::LogicalPosition::new(x, y));
         }
+        let _ = window.set_always_on_top(true);
         let _ = window.show();
         let _ = window.set_focus();
         return;
@@ -729,6 +751,7 @@ pub fn open_settings(app: &AppHandle) {
             .resizable(true)
             .decorations(true)
             .skip_taskbar(true)
+            .always_on_top(true)
             .transparent(!cfg!(target_os = "windows"));
     let builder = match center {
         Some((x, y)) => builder.position(x, y),
@@ -769,6 +792,7 @@ pub fn open_settings(app: &AppHandle) {
                 }
             });
 
+            let _ = window.set_always_on_top(true);
             let _ = window.show();
             let _ = window.set_focus();
             write_log(app, "Settings window opened");

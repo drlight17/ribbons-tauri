@@ -10,7 +10,7 @@
     "rust"
   ],
   "type": "module",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "author": "Yuri Samoilov <root@drlight.fun>",
   "homepage": "https://github.com/drlight17/ribbons-tauri",
   "apiLink": "https://api.github.com/repos/drlight17/ribbons-tauri",
@@ -18,12 +18,12 @@
     "help": "node scripts/help.mjs",
     "dev": "tauri dev --no-dev-server",
     "start": "tauri dev --no-dev-server",
-    "build": "tauri build && node scripts/rename-artifacts.mjs && node scripts/latest-json.mjs",
+    "build": "node scripts/tauri-build.mjs build && node scripts/rename-artifacts.mjs && node scripts/latest-json.mjs",
     "tauri": "tauri",
     "block": "node scripts/update-block.mjs block",
     "unblock": "node scripts/update-block.mjs unblock",
-    "build-rpm": "tauri build --bundles rpm && node scripts/rename-artifacts.mjs",
-    "build-deb": "tauri build --bundles deb && node scripts/rename-artifacts.mjs",
+    "build-rpm": "npm run block && tauri build --bundles rpm && node scripts/rename-artifacts.mjs && node scripts/latest-json.mjs && npm run unblock",
+    "build-deb": "npm run block && node scripts/tauri-build.mjs build --bundles deb && node scripts/rename-artifacts.mjs && node scripts/latest-json.mjs && npm run unblock",
     "build-AppImage": "tauri build --bundles appimage && node scripts/rename-artifacts.mjs && node scripts/latest-json.mjs",
     "build-targz": "npm run block && tauri build --no-bundle && node scripts/archive.mjs targz && npm run unblock",
     "build-exe": "tauri build --bundles nsis && node scripts/rename-artifacts.mjs && node scripts/latest-json.mjs",
@@ -32,10 +32,11 @@
     "build-zip-mac": "npm run block && tauri build --bundles app && node scripts/rename-artifacts.mjs && node scripts/latest-json.mjs && node scripts/archive.mjs zip-mac && npm run unblock",
     "build-dmg": "tauri build --bundles app,dmg && node scripts/rename-artifacts.mjs && node scripts/latest-json.mjs",
     "build-win": "npm run build-zip && npm run build-msi && npm run build-exe",
-    "build-mac": "npm run build-zip-mac && npm run build-dmg",
+    "build-mac": "node scripts/build-mac.mjs",
     "build-linux": "npm run build-rpm && npm run build-deb && npm run build-targz && npm run build-AppImage",
     "latest-json": "node scripts/latest-json.mjs",
-    "rename-artifacts": "node scripts/rename-artifacts.mjs"
+    "rename-artifacts": "node scripts/rename-artifacts.mjs",
+    "merge-latest": "node scripts/merge-latest.mjs"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.12.0"

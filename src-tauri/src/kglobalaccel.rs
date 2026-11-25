@@ -146,3 +146,26 @@ async fn run(app: &AppHandle, pause_label: &str, restart_label: &str) -> zbus::R
     }
     Ok(())
 }
+
+/// Remove this app's KGlobalAccel actions so a non-KGlobalAccel backend (X11
+/// key grabs) can take over the same key combinations.
+pub async fn unregister(app: &AppHandle) {
+    let result = async {
+        let connection = zbus::Connection::session().await?;
+        let proxy = zbus::Proxy::new(&connection, SERVICE, OBJECT, INTERFACE).await?;
+        for action in &ACTIONS {
+            let _: bool = proxy
+                .call("unregister", &(COMPONENT, action.unique))
+                .await?;
+        }
+        Ok::<(), zbus::Error>(())
+    }
+    .await;
+
+    if let Err(err) = result {
+        write_log(
+            app,
+            format!("Could not remove KGlobalAccel bindings: {err}"),
+        );
+    }
+}

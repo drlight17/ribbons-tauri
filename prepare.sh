@@ -24,14 +24,14 @@ install_linux_packages() {
     sudo pacman -S --needed --noconfirm \
       base-devel curl wget file openssl \
       webkit2gtk-4.1 libayatana-appindicator gtk3 libsoup3 dbus \
-      libx11 libxi libxtst xorg-xprop pipewire libpulse
+      libx11 libxi libxtst xorg-xprop pipewire libpulse fakeroot
   elif command -v apt-get >/dev/null 2>&1; then
     sudo apt-get update
     sudo apt-get install -y \
       build-essential curl wget file libssl-dev pkg-config \
       libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
       libx11-dev libxi-dev libxtst-dev x11-utils libdbus-1-dev \
-      libpipewire-0.3-dev libpulse-dev pulseaudio-utils
+      libpipewire-0.3-dev libpulse-dev pulseaudio-utils fakeroot
   else
     echo "Install the Tauri 2 Linux prerequisites for your distribution:" >&2
     echo "https://v2.tauri.app/start/prerequisites/" >&2

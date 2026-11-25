@@ -7,8 +7,24 @@ const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const mode = process.argv[2];
 const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const version = packageJson.version;
-const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
-const releaseDir = path.join(root, 'src-tauri', 'target', 'release');
+const targetTriple =
+  process.env.TAURI_ENV_TARGET_TRIPLE || process.env.CARGO_BUILD_TARGET || '';
+const arch = /universal/i.test(targetTriple)
+  ? 'universal'
+  : /aarch64|arm64/i.test(targetTriple)
+    ? 'arm64'
+    : /x86_64|x64|amd64/i.test(targetTriple)
+      ? 'x64'
+      : process.arch === 'arm64'
+        ? 'arm64'
+        : 'x64';
+const releaseDir = path.join(
+  root,
+  'src-tauri',
+  'target',
+  ...(targetTriple ? [targetTriple] : []),
+  'release',
+);
 const isWindows = process.platform === 'win32';
 
 function run(command, args, options = {}) {

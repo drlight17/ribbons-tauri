@@ -147,12 +147,17 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     media::start(handle.clone());
     hid::start(handle.clone());
 
+    // Do not trust a cached latestVersion from a previous run.
+    updates::clear_cached_version(&handle);
+
     let update_handle = handle.clone();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        updates::clear_cached_version(&update_handle);
         updates::check_new_version(&update_handle, false).await;
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(60 * 60)).await;
+            updates::clear_cached_version(&update_handle);
             updates::check_new_version(&update_handle, false).await;
         }
     });
@@ -229,12 +234,25 @@ fn check_reduce_transparency(app: &AppHandle) {
 fn register_shortcuts(app: &AppHandle) {
     #[cfg(target_os = "linux")]
     if autostart::is_kde() {
-        let (pause, restart) = {
-            let state = app.state::<AppState>();
-            let i18n = state.i18n.lock().unwrap();
-            (i18n.t("pause"), i18n.t("restart_app"))
-        };
-        crate::kglobalaccel::start(app.clone(), pause, restart);
+        if autostart::is_wayland() {
+            let (pause, restart) = {
+                let state = app.state::<AppState>();
+                let i18n = state.i18n.lock().unwrap();
+                (i18n.t("pause"), i18n.t("restart_app"))
+            };
+            crate::kglobalaccel::start(app.clone(), pause, restart);
+            return;
+        }
+
+        // X11 key grabs are reliable; KGlobalAccel is only needed on Wayland.
+        // Remove stale KGlobalAccel grabs from earlier Wayland sessions first,
+        // otherwise they would keep Ctrl+P/Alt+Shift+Escape grabbed and the
+        // X11 plugin registration would fail.
+        let app_for_register = app.clone();
+        tauri::async_runtime::spawn(async move {
+            crate::kglobalaccel::unregister(&app_for_register).await;
+            register_plugin_shortcuts(&app_for_register);
+        });
         return;
     }
 

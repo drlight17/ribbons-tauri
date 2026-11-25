@@ -15,14 +15,76 @@ pub fn update_blocked(app: &AppHandle) -> bool {
     if option_env!("RIBBONS_UPDATE_BLOCK") == Some("1") {
         return true;
     }
-    resource_file(app, "UPDATE_BLOCK").exists()
+    if resource_file(app, "UPDATE_BLOCK").exists() {
+        return true;
+    }
+
+    // Tauri's Linux updater can only install AppImage updates. A binary
+    // packaged into deb/rpm/tar.gz must be updated by the package manager or
+    // by downloading a new package, even when AppImage and deb/rpm share the
+    // same build.
+    #[cfg(target_os = "linux")]
+    {
+        if config::is_packaged() && std::env::var_os("APPIMAGE").is_none() {
+            return true;
+        }
+    }
+
+    false
+}
+
+pub fn clear_cached_version(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let mut store = state.store.lock().unwrap();
+    if store.delete("latestVersion") {
+        let _ = store.save();
+    }
+}
+
+pub fn forget_remembered_version(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let mut store = state.store.lock().unwrap();
+    if store.delete("new_version_remember") {
+        let _ = store.save();
+    }
 }
 
 pub fn spawn_check(app: &AppHandle, call_dialog: bool) {
+    // Always fetch the current release instead of reusing an old cached tag.
+    clear_cached_version(app);
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         check_new_version(&app, call_dialog).await;
     });
+}
+
+/// Show the update dialog for the version advertised in the tray. Clicking the
+/// version item is an explicit user request, so a remembered dismissal does not
+/// suppress it and the remember entry is discarded.
+pub fn show_update_dialog(app: &AppHandle) {
+    forget_remembered_version(app);
+
+    let state = app.state::<AppState>();
+    let (runtime_latest, runtime_url) = {
+        let runtime = state.runtime.lock().unwrap();
+        (runtime.latest_version.clone(), runtime.release_url.clone())
+    };
+    let (latest, url) = match (runtime_latest, runtime_url) {
+        (Some(latest), Some(url)) => (latest, url),
+        _ => {
+            let store = state.store.lock().unwrap();
+            match (store.get_str("latestVersion"), store.get_str("releaseUrl")) {
+                (Some(latest), Some(url)) => (latest, url),
+                _ => {
+                    drop(store);
+                    spawn_check(app, true);
+                    return;
+                }
+            }
+        }
+    };
+
+    open_new_version_dialog(app, &latest, &url, true);
 }
 
 pub async fn check_new_version(app: &AppHandle, call_dialog: bool) {
@@ -95,7 +157,7 @@ pub async fn check_new_version(app: &AppHandle, call_dialog: bool) {
                 runtime.release_url = Some(url.clone());
             }
             crate::tray::rebuild_menu(app);
-            open_new_version_dialog(app, &latest, &url);
+            open_new_version_dialog(app, &latest, &url, false);
         }
         Ordering::Greater => {
             write_log(app, "You are using a newer version.");
@@ -207,11 +269,11 @@ fn set_update_modal(app: &AppHandle, open: bool) {
     }
 }
 
-fn open_new_version_dialog(app: &AppHandle, latest: &str, url: &str) {
+fn open_new_version_dialog(app: &AppHandle, latest: &str, url: &str, force: bool) {
     if app.get_webview_window("update").is_some() {
         return;
     }
-    if is_remembered(app, latest) {
+    if !force && is_remembered(app, latest) {
         return;
     }
 

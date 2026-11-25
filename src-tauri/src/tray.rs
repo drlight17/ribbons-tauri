@@ -226,18 +226,27 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
 fn on_menu_event(app: &AppHandle, event: MenuEvent) {
     match event.id().as_ref() {
         "play" => {
-            let ids = display_ids(app);
-            for id in ids {
-                crate::windows::start_screensaver(app, &id, false);
-            }
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                for id in display_ids(&app) {
+                    crate::windows::start_screensaver(&app, &id, false);
+                }
+            });
         }
         "pause" => {
-            let ids = display_ids(app);
-            for id in ids {
-                crate::windows::toggle_screensaver(app, &id);
-            }
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                for id in display_ids(&app) {
+                    crate::windows::toggle_screensaver(&app, &id);
+                }
+            });
         }
-        "settings" => crate::windows::open_settings(app),
+        "settings" => {
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                crate::windows::open_settings(&app);
+            });
+        }
         "settings_json" => {
             let state = app.state::<AppState>();
             let path = state.config_dir.join("config.json");
@@ -247,10 +256,19 @@ fn on_menu_event(app: &AppHandle, event: MenuEvent) {
             );
             crate::dialogs::open_file(app, path);
         }
-        "about_show" => crate::windows::open_about(app),
-        "update_status" | "check_update" => {
-            crate::updates::spawn_check(app, true);
+        "about_show" => {
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                crate::windows::open_about(&app);
+            });
         }
+        "update_status" => {
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                crate::updates::show_update_dialog(&app);
+            });
+        }
+        "check_update" => crate::updates::spawn_check(app, true),
         "restart" => crate::autostart::restart_app(app),
         "exit" => {
             {

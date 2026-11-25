@@ -555,6 +555,21 @@ const Ribbons = (function (name, factory) {
                 return;
             }
 
+            // X11 may map a window after the initial options are applied, so
+            // the first layout can be 0x0. Re-read the viewport each frame.
+            if (typeof window !== "undefined") {
+                var vw = window.innerWidth || 0;
+                var vh = window.innerHeight || 0;
+                if (
+                    vw > 0 &&
+                    vh > 0 &&
+                    (Math.abs(vw - this._width) > 0.5 ||
+                        Math.abs(vh - this._height) > 0.5)
+                ) {
+                    this._onResize();
+                }
+            }
+
             if (this._stretch && this._epochMs) {
                 var target = this._targetFrame();
                 var steps = target - this._frame;

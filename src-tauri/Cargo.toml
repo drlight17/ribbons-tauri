@@ -1,6 +1,6 @@
 [package]
 name = "ribbons-tauri"
-version = "1.0.3"
+version = "1.0.4"
 description = "Ribbons Screensaver for Windows, macOS and Linux"
 authors = ["Yuri Samoilov <root@drlight.fun>"]
 edition = "2021"

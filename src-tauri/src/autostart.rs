@@ -24,6 +24,22 @@ pub fn is_kde() -> bool {
     }
 }
 
+pub fn is_wayland() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        match std::env::var("XDG_SESSION_TYPE") {
+            Ok(value) if value.eq_ignore_ascii_case("wayland") => return true,
+            Ok(value) if value.eq_ignore_ascii_case("x11") => return false,
+            _ => {}
+        }
+        std::env::var_os("WAYLAND_DISPLAY").is_some()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        false
+    }
+}
+
 pub fn restart_app(app: &AppHandle) {
     let args: Vec<String> = std::env::args().collect();
 
