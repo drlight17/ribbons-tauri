@@ -1,0 +1,72 @@
+name: Sync ribbon engines to landing
+
+# Requires a repository secret LANDING_SYNC_TOKEN with write access to
+# drlight17/ribbons-landing (fine-grained PAT: Contents = Read and write).
+#
+# The ribbon engines are pushed to the root of drlight17/ribbons-landing.
+# If that repository uses another default branch, adjust LANDING_BRANCH below.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ui/ribbons.js
+      - ui/ribbons_modern.js
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: landing-sync
+  cancel-in-progress: false
+
+env:
+  LANDING_REPOSITORY: drlight17/ribbons-landing
+  LANDING_BRANCH: main
+
+jobs:
+  sync:
+    # Do not run in forks of the source repository.
+    if: github.repository == 'drlight17/ribbons-tauri'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout ribbons-tauri
+        uses: actions/checkout@v4
+        with:
+          path: source
+
+      - name: Checkout ribbons-landing
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.LANDING_REPOSITORY }}
+          ref: ${{ env.LANDING_BRANCH }}
+          token: ${{ secrets.LANDING_SYNC_TOKEN }}
+          path: landing
+
+      - name: Copy ribbon engines
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp "source/ui/ribbons.js" "landing/ribbons.js"
+          cp "source/ui/ribbons_modern.js" "landing/ribbons_modern.js"
+
+      - name: Commit and push to landing
+        shell: bash
+        working-directory: landing
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add ribbons.js ribbons_modern.js
+
+          if git diff --cached --quiet; then
+            echo "Ribbon engines are already up to date."
+            exit 0
+          fi
+
+          git commit -m "Sync ribbon engines from ribbons-tauri@${GITHUB_SHA::7}"
+          git push origin "HEAD:${LANDING_BRANCH}"
