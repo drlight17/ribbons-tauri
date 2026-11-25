@@ -206,6 +206,18 @@ mod linux {
             capture_x11(app).or_else(|| capture_with_commands(&path, false))
         };
 
+        if image.is_none() {
+            let hint = if wayland {
+                "Install grim (wlroots), spectacle (KDE) or gnome-screenshot (GNOME)."
+            } else {
+                "Install spectacle (KDE), gnome-screenshot (GNOME), maim, scrot or ImageMagick import."
+            };
+            write_log(
+                app,
+                format!("Glass capture failed: no screenshot tool succeeded. {hint}"),
+            );
+        }
+
         let _ = std::fs::remove_file(&path);
         image
     }
@@ -230,6 +242,17 @@ mod linux {
         } else {
             attempts.push(("maim", vec![path.clone()]));
             attempts.push(("scrot", vec![path.clone()]));
+            attempts.push((
+                "spectacle",
+                vec![
+                    "-b".into(),
+                    "-n".into(),
+                    "-f".into(),
+                    "-o".into(),
+                    path.clone(),
+                ],
+            ));
+            attempts.push(("gnome-screenshot", vec!["-f".into(), path.clone()]));
             attempts.push((
                 "import",
                 vec!["-window".into(), "root".into(), path.clone()],
