@@ -32,7 +32,17 @@ pub fn is_wayland() -> bool {
             Ok(value) if value.eq_ignore_ascii_case("x11") => return false,
             _ => {}
         }
-        std::env::var_os("WAYLAND_DISPLAY").is_some()
+        if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+            return true;
+        }
+
+        // Launchers occasionally strip the session variables. Ask the live
+        // GDK display which backend the UI is actually using.
+        if let Some(display) = gtk::gdk::Display::default() {
+            use gtk::glib::object::ObjectExt as _;
+            return display.type_().name().contains("Wayland");
+        }
+        false
     }
     #[cfg(not(target_os = "linux"))]
     {

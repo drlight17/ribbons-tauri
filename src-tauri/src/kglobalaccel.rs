@@ -89,31 +89,37 @@ async fn run(app: &AppHandle, pause_label: &str, restart_label: &str) -> zbus::R
             .iter()
             .any(|(sequence,)| sequence.iter().any(|value| *value != 0));
 
-        if configured {
-            write_log(
-                app,
-                format!(
-                    "KDE shortcut {} already configured: {existing:?}",
-                    action.unique
-                ),
-            );
-            continue;
-        }
-
-        let key_list = keys(action.key);
-        // The canonical client sends both the active and the default binding.
+        // Always call setShortcutKeys, even when a binding is already stored.
+        // doRegister alone only creates the action; KGlobalAccel does not
+        // necessarily grab the key again until the active shortcut is set.
+        let key_list = if configured {
+            existing
+        } else {
+            keys(action.key)
+        };
         let active: Vec<(Vec<i32>,)> = proxy
             .call(
                 "setShortcutKeys",
                 &(id.clone(), key_list.clone(), FLAG_SET_PRESENT),
             )
             .await?;
-        let _: Vec<(Vec<i32>,)> = proxy
-            .call("setShortcutKeys", &(id, key_list, FLAG_IS_DEFAULT))
-            .await?;
+        if !configured {
+            // Only seed the default when the user has no binding yet.
+            let _: Vec<(Vec<i32>,)> = proxy
+                .call("setShortcutKeys", &(id, key_list, FLAG_IS_DEFAULT))
+                .await?;
+        }
         write_log(
             app,
-            format!("KDE shortcut {} registered: {active:?}", action.unique),
+            format!(
+                "KDE shortcut {} {}: {active:?}",
+                action.unique,
+                if configured {
+                    "activated"
+                } else {
+                    "registered"
+                }
+            ),
         );
     }
 
