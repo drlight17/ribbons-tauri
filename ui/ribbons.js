@@ -31,6 +31,25 @@ const Ribbons = (function (name, factory) {
             return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
         };
     };
+    // #rrggbb / #rgb → {r,g,b}
+    var hexToRgb = function (value) {
+        if (typeof value !== "string") return null;
+        var text = value.trim();
+        var match = text.match(/^#?([0-9a-f]{6})$/i);
+        if (match) {
+            var n = parseInt(match[1], 16);
+            return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+        }
+        match = text.match(/^#?([0-9a-f])([0-9a-f])([0-9a-f])$/i);
+        if (match) {
+            return {
+                r: parseInt(match[1] + match[1], 16),
+                g: parseInt(match[2] + match[2], 16),
+                b: parseInt(match[3] + match[3], 16)
+            };
+        }
+        return null;
+    };
     // random helper
     var random = function () {
         if (arguments.length === 1) { // only 1 argument
@@ -150,6 +169,7 @@ const Ribbons = (function (name, factory) {
         this._scroll = 0;
         this._ribbons = [];
         this._saved_color_index = 0;
+        this._saved_custom_color_index = 0;
         this._options = {
             // ribbon color HSL saturation amount
             colorSaturation: "80%",
@@ -177,6 +197,9 @@ const Ribbons = (function (name, factory) {
             glow: 10,
             // single color default is off (random ribbons colors)
             singleColor: false,
+            // per-ribbon custom colors (hex strings)
+            customColorsEnabled: false,
+            customColors: [],
             /**
              * Background backgroundMode — painted on dedicated bg canvas (same as RibbonsModern).
              *   "dark"          — solid black
@@ -350,8 +373,41 @@ const Ribbons = (function (name, factory) {
         },
         // Create a new random ribbon and to the list
         addRibbon: function() {
+            var palette = Array.isArray(this._options.customColors)
+                ? this._options.customColors.filter(function (color) {
+                      return typeof color === "string" && color;
+                  })
+                : [];
+            var customIndex = -1;
+            var customColor = null;
+            var customRgb = null;
+            if (this._options.customColorsEnabled && palette.length) {
+                var used = {};
+                for (var ri = 0; ri < this._ribbons.length; ri++) {
+                    var existing = this._ribbons[ri];
+                    if (existing && typeof existing.customIndex === "number") {
+                        used[existing.customIndex % palette.length] = true;
+                    }
+                }
+                for (var ci = 0; ci < palette.length; ci++) {
+                    if (!used[ci]) {
+                        customIndex = ci;
+                        break;
+                    }
+                }
+                if (customIndex < 0) {
+                    customIndex = this._saved_custom_color_index % palette.length;
+                    this._saved_custom_color_index++;
+                }
+                customColor = palette[customIndex];
+                customRgb = hexToRgb(customColor);
+                if (!customRgb) {
+                    customColor = null;
+                }
+            }
+
             // tricolor
-            if (this._options.singleColor === 667 ) {
+            if (!customColor && this._options.singleColor === 667 ) {
                 this._options.ribbonCount = 3;
             }
             var sceneW = Math.max(1, this._sceneWidth || this._width);
@@ -375,8 +431,9 @@ const Ribbons = (function (name, factory) {
                 starty = sceneH - hide;
             }
             // ribbon sections data
-            // tricolor
-            if (this._options.singleColor === 667 ) {
+            if (customColor) {
+                var color = customColor;
+            } else if (this._options.singleColor === 667 ) {
                 var hues = [667, 240, 360];
                 if (this._saved_color_index >= hues.length) {
                     this._saved_color_index = 0;
@@ -413,6 +470,7 @@ const Ribbons = (function (name, factory) {
                     point2: new Point(point2.x, point2.y),
                     point3: point3,
                     color: color,
+                    customRgb: customRgb,
                     delay: delay,
                     dir: dir,
                     alpha: 0,
@@ -421,11 +479,15 @@ const Ribbons = (function (name, factory) {
                 point1.copy(point2);
                 point2.copy(point3);
                 delay += this._options.delay;
-                color += this._options.colorCycleSpeed;
+                if (!customColor) {
+                    color += this._options.colorCycleSpeed;
+                }
                 
             }
             // tricolor
-            if (this._options.singleColor === 667 ) {
+            if (customColor) {
+                ribbon.customIndex = customIndex;
+            } else if (this._options.singleColor === 667 ) {
                 this._saved_color_index++;
             }
             this._ribbons.push(ribbon);
@@ -465,14 +527,20 @@ const Ribbons = (function (name, factory) {
             if (!section || section.alpha <= 0) return;
             var s;
             var l;
-            if (section.color === 667) {
-                s = "0%";
-                l = "100%";
+            var c;
+            if (section.customRgb) {
+                var rgb = section.customRgb;
+                c = "rgba(" + rgb.r + ", " + rgb.g + ", " + rgb.b + ", " + section.alpha + ")";
             } else {
-                s = this._options.colorSaturation;
-                l = this._options.colorBrightness;
+                if (section.color === 667) {
+                    s = "0%";
+                    l = "100%";
+                } else {
+                    s = this._options.colorSaturation;
+                    l = this._options.colorBrightness;
+                }
+                c = "hsla(" + section.color + ", " + s + ", " + l + ", " + section.alpha + " )";
             }
-            var c = "hsla(" + section.color + ", " + s + ", " + l + ", " + section.alpha + " )";
             this._context.save();
             if (this._options.parallaxAmount !== 0) {
                 this._context.translate(0, this._scroll * this._options.parallaxAmount);

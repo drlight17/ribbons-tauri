@@ -45,3 +45,30 @@ export function closeCurrentWindow() {
     window.close();
     return Promise.resolve();
 }
+
+let heartbeatTimer = null;
+
+function sendHeartbeat() {
+    if (!hasTauri) return;
+    invoke('renderer_heartbeat').catch(() => {});
+}
+
+export function startHeartbeat(intervalMs = 2000) {
+    if (!hasTauri || heartbeatTimer) return;
+    sendHeartbeat();
+    heartbeatTimer = setInterval(sendHeartbeat, intervalMs);
+}
+
+startHeartbeat();
+
+if (typeof window !== 'undefined') {
+    window.addEventListener('error', (event) => {
+        if (!hasTauri) return;
+        const where = event.filename ? `${event.filename}:${event.lineno}:${event.colno}` : '';
+        send('debug', `[js-error] ${event.message} ${where}`).catch(() => {});
+    });
+    window.addEventListener('unhandledrejection', (event) => {
+        if (!hasTauri) return;
+        send('debug', `[js-rejection] ${String(event.reason)}`).catch(() => {});
+    });
+}

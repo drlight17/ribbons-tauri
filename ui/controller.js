@@ -205,19 +205,22 @@ function start_Ribbons(colorSaturation, colorCycleSpeed, options) {
       : (options["glow"] != null ? options["glow"] : 30);
     Ribbons_instance = new Ribbons({
         colorSaturation: colorSaturation,
-        colorBrightness: "50%",
-        colorAlpha: 1,
+        colorBrightness: (options["colorBrightness"] != null ? options["colorBrightness"] : 50) + "%",
+        colorAlpha: options["colorAlpha"] != null ? options["colorAlpha"] : 1,
         colorCycleSpeed: colorCycleSpeed,
-        verticalPosition: "random",
+        verticalPosition: options["verticalPosition"] || "random",
         horizontalSpeed: options["horizontalSpeed"],
         delay: options["delay"],
         phase: options["phase"],
         ribbonCount: options["ribbonCount"],
-        strokeSize: 1,
-        parallaxAmount: -0.3,
-        animateSections: true,
+        strokeSize: options["strokeSize"] != null ? options["strokeSize"] : 1,
+        parallaxAmount: options["parallaxAmount"] != null ? options["parallaxAmount"] : -0.3,
+        animateSections: options["animateSections"] !== false,
         glow: classicBlur,
+        ribbonBlur: classicBlur,
         singleColor: options["singleColor"],
+        customColorsEnabled: !!options["customColorsEnabled"],
+        customColors: Array.isArray(options["customColors"]) ? options["customColors"] : [],
         // Canvas-painted background (same modes as modern)
         backgroundMode: options["backgroundMode"] || "darkGradient",
         stretched: sync.stretched,
@@ -265,8 +268,13 @@ function classicSpeedKey(v) {
 }
 
 function mapModernOptions(got) {
+    var customColorsEnabled =
+        !!got.customColorsEnabled &&
+        Array.isArray(got.customColors) &&
+        got.customColors.length > 0;
+    var customColors = customColorsEnabled ? got.customColors : [];
     var mode = "classic";
-    if (got.mode === "tricolor" || got.singleColor === 667) {
+    if (!customColorsEnabled && (got.mode === "tricolor" || got.singleColor === 667)) {
         mode = "tricolor";
     }
     got.horizontalSpeed = normalizeModernSpeed(got.horizontalSpeed);
@@ -275,8 +283,12 @@ function mapModernOptions(got) {
     if (mode === "tricolor" && count < 3) count = 3;
     // singleColor: false | 666 | 667 | 0..360 (same as classic ribbons.js)
     var singleColor = got.singleColor !== undefined ? got.singleColor : false;
-    if (singleColor === 667) {
+    if (!customColorsEnabled && singleColor === 667) {
         mode = "tricolor";
+    }
+    if (customColorsEnabled) {
+        singleColor = false;
+        mode = "classic";
     }
    
     var bg = got.backgroundMode || "darkGradient";
@@ -284,6 +296,8 @@ function mapModernOptions(got) {
     return {
         mode: mode,
         singleColor: singleColor,
+        customColorsEnabled: customColorsEnabled,
+        customColors: customColors,
         backgroundMode: bg,
         ribbonCount: count,
         opacity: got.opacity != null ? got.opacity : 70,
@@ -318,6 +332,13 @@ function start_RibbonsModern(got_options) {
     stop_Ribbons();
     engine = 'modern';
     Ribbons_instance = new RibbonsModern(mapModernOptions(got_options));
+}
+
+function hide_cursor_now() {
+    document.body.style.cursor = "none";
+    allCloseButtons().forEach((btn) => btn.classList.add('hidden'));
+    clearTimeout(hideCursorTimer);
+    lastShow = 0;
 }
 
 function show_cursor(){
@@ -369,6 +390,7 @@ on('send-options', (payload) => {
     const got_options = payload && payload.options ? payload.options : payload;
     const pause = payload && payload.paused != null ? payload.paused : false;
     if (!pause) {
+        hide_cursor_now();
         if (Ribbons_instance && typeof Ribbons_instance.resume === 'function') {
             Ribbons_instance.resume();
         }
@@ -395,8 +417,10 @@ on('send-options', (payload) => {
         start_RibbonsModern(options);
     } else {
         var colorCycleSpeed = options["colorCycleSpeed"];
-        var colorSaturation = "60%";
-        if ((options["singleColor"]) || (options["singleColor"] == 666) || (options["singleColor"] == 667)) {
+        var colorSaturation = (options["colorSaturation"] != null ? options["colorSaturation"] : 60) + "%";
+        if (options["customColorsEnabled"]) {
+            colorCycleSpeed = 0;
+        } else if ((options["singleColor"]) || (options["singleColor"] == 666) || (options["singleColor"] == 667)) {
             colorCycleSpeed = 0;
         }
         if (options["singleColor"] == 666) {

@@ -35,6 +35,40 @@ var RibbonsModern = (function () {
         ["#2867e8", "#2867e8", "#2867e8"],
         ["#ff414d", "#ff414d", "#ff414d"]
     ];
+    // #rrggbb / #rgb → {r,g,b}
+    var hexToRgb = function (value) {
+        if (typeof value !== "string") return null;
+        var text = value.trim();
+        var match = text.match(/^#?([0-9a-f]{6})$/i);
+        if (match) {
+            var n = parseInt(match[1], 16);
+            return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+        }
+        match = text.match(/^#?([0-9a-f])([0-9a-f])([0-9a-f])$/i);
+        if (match) {
+            return {
+                r: parseInt(match[1] + match[1], 16),
+                g: parseInt(match[2] + match[2], 16),
+                b: parseInt(match[3] + match[3], 16)
+            };
+        }
+        return null;
+    };
+    var mixWithWhite = function (rgb, amount) {
+        var mix = function (channel) {
+            return Math.round(channel + (255 - channel) * amount);
+        };
+        return "rgb(" + mix(rgb.r) + ", " + mix(rgb.g) + ", " + mix(rgb.b) + ")";
+    };
+    var tripleFromHex = function (value) {
+        var rgb = hexToRgb(value);
+        if (!rgb) return null;
+        return [
+            mixWithWhite(rgb, 0.42),
+            "rgb(" + rgb.r + ", " + rgb.g + ", " + rgb.b + ")",
+            mixWithWhite(rgb, 0.62)
+        ];
+    };
     var Factory = function (options) {
         this._canvas = null;
         this._context = null;
@@ -73,11 +107,14 @@ var RibbonsModern = (function () {
              *   0..360     — fixed HSL hue for every ribbon
              */
             singleColor: false,
+            // per-ribbon custom colors (hex strings)
+            customColorsEnabled: false,
+            customColors: [],
             // darkGradient | lightGradient | light | dark | transparent | glass
             // transparent/glass = no background fill (for glasstron / acrylic blur windows)
             backgroundMode: "darkGradient",
             // how many ribbons on screen
-            ribbonCount: 5,
+            ribbonCount: 10,
             // opacity 0..100
             opacity: 85,
             // glow intensity 0..200 (additive silhouette fill — not canvas shadowBlur)
@@ -100,13 +137,13 @@ var RibbonsModern = (function () {
              */
             edgeSoftness: 100,
             // animation speed multiplier
-            horizontalSpeed: 1.5,
+            horizontalSpeed: 2.8,
             // visible span factors
             minLength: 1,
             maxLength: 6,
             // ribbon width in px
             minWidth: 25,
-            maxWidth: 55,
+            maxWidth: 60,
             // if true, ribbons grow from edge instead of traveling
             endless: false,
             /**
@@ -156,21 +193,27 @@ var RibbonsModern = (function () {
                     }
                 }
             }
-            // singleColor 667 ↔ tricolor mode (classic ribbons.js parity)
-            if (this._options.singleColor === 667) {
-                this._options.mode = "tricolor";
-            } else if (this._options.mode === "tricolor" && this._options.singleColor === false) {
-                // explicit mode without singleColor still works
-            } else if (this._options.singleColor !== false && this._options.singleColor !== 667) {
-                // fixed hue / gray — not tricolor
-                if (this._options.mode === "tricolor") {
-                    this._options.mode = "classic";
+            var hasCustomColors =
+                this._options.customColorsEnabled &&
+                Array.isArray(this._options.customColors) &&
+                this._options.customColors.length > 0;
+            if (!hasCustomColors) {
+                // singleColor 667 ↔ tricolor mode (classic ribbons.js parity)
+                if (this._options.singleColor === 667) {
+                    this._options.mode = "tricolor";
+                } else if (this._options.mode === "tricolor" && this._options.singleColor === false) {
+                    // explicit mode without singleColor still works
+                } else if (this._options.singleColor !== false && this._options.singleColor !== 667) {
+                    // fixed hue / gray — not tricolor
+                    if (this._options.mode === "tricolor") {
+                        this._options.mode = "classic";
+                    }
                 }
-            }
-            // tricolor needs at least 3 ribbons for white/blue/red cycle
-            if ((this._options.mode === "tricolor" || this._options.singleColor === 667) &&
-                this._options.ribbonCount < 3) {
-                this._options.ribbonCount = 3;
+                // tricolor needs at least 3 ribbons for white/blue/red cycle
+                if ((this._options.mode === "tricolor" || this._options.singleColor === 667) &&
+                    this._options.ribbonCount < 3) {
+                    this._options.ribbonCount = 3;
+                }
             }
             if (this._options.minLength > this._options.maxLength) {
                 this._options.maxLength = this._options.minLength;
@@ -361,6 +404,24 @@ var RibbonsModern = (function () {
          *   number → fixed hue for every ribbon
          */
         _colorsFor: function (i) {
+            var customColors =
+                this._options.customColorsEnabled &&
+                Array.isArray(this._options.customColors)
+                    ? this._options.customColors.filter(function (color) {
+                          return typeof color === "string" && color;
+                      })
+                    : [];
+            if (customColors.length) {
+                var customIndex =
+                    typeof i === "number" && i >= 0
+                        ? i % customColors.length
+                        : Math.floor(currentRandom() * customColors.length);
+                var customTriple = tripleFromHex(customColors[customIndex]);
+                if (customTriple) {
+                    return customTriple;
+                }
+            }
+
             var sc = this._options.singleColor;
             var isTricolor =
                 this._options.mode === "tricolor" || sc === 667;
@@ -413,28 +474,66 @@ var RibbonsModern = (function () {
             var curlHarmonic = 2.0;
             var curlHarmonicMix = rand(0.05, 0.15);
             var baseAmp = this._options.curlAmplitude * rand(0.75, 1.05);
-            var curlAmp = Math.min(0.18, baseAmp * (0.4 + 0.28 * clamp(curlTurns, 0, 2)));
+            var curlAmp = Math.min(0.9, baseAmp * (0.4 + 0.28 * clamp(curlTurns, 0, 4)));
             // Spiral bias: growing lateral amp along path when curl is high
             var spiralBias = curlTurns > 0.9
                 ? clamp((curlTurns - 0.7) / 2.0, 0, 1) * rand(0.25, 0.7)
                 : 0;
-            var spread = 0.35 + 0.3 * clamp(curlTurns, 0, 2);
-            return {
+            var curlComplexity = clamp((curlTurns - 0.7) / 1.8, 0, 1)
+                * clamp((curlAmp - 0.05) / 0.13, 0, 1);
+            // Vary the path figure across ribbons; extreme curl unlocks the
+            // loopier figures while low curl stays with gentle waves.
+            var pathFigure = "sine";
+            var figureRoll = currentRandom();
+            if (curlTurns > 0.45 && curlComplexity > 0.1) {
+                var figures = ["sine", "double", "helix", "figure8", "coil", "spiral", "loop"];
+                pathFigure = figures[Math.floor(figureRoll * figures.length)];
+            } else if (curlTurns > 0.25) {
+                pathFigure = figureRoll < 0.55 ? "sine" : "double";
+            }
+            var start = edgePoint(a);
+            var end = edgePoint(b);
+            var chordX = end.x - start.x;
+            var chordY = end.y - start.y;
+            var chordLen = Math.hypot(chordX, chordY) || 1;
+            var perpX = -chordY / chordLen;
+            var perpY = chordX / chordLen;
+            // Gentle single-sided bow: both control points share the same
+            // perpendicular offset, so the base cubic is a smooth C instead of
+            // random S-shaped control nets that can create hairpins.
+            // Strong same-side bow creates a broad 90–180° base turn; the
+            // opposite component adds an S-curve. Extreme curl unlocks both.
+            var turnStrength = clamp((curlTurns - 0.45) / 1.8, 0, 1);
+            var baseTurn = rand(-1, 1) * (0.1 + 0.75 * turnStrength) * (0.5 + 0.5 * curlComplexity);
+            var sBow = rand(-0.2, 0.2) * curlComplexity;
+            var bow1 = baseTurn + sBow;
+            var bow2 = baseTurn - sBow;
+            var t1 = rand(0.27, 0.36);
+            var t2 = rand(0.64, 0.73);
+            var p1 = {
+                x: start.x + chordX * t1 + perpX * bow1,
+                y: start.y + chordY * t1 + perpY * bow1
+            };
+            var p2 = {
+                x: start.x + chordX * t2 + perpX * bow2,
+                y: start.y + chordY * t2 + perpY * bow2
+            };
+            var ribbon = {
                 id: currentRandom(),
                 depthTime: rand(0, Math.PI * 2),
                 drawOrder: currentRandom(),
                 width: rand(minW, maxW),
                 life: rand(26, 39) * rand(0.72, 1.28),
                 lengthFactor: rand(0.55, 1),
-                age: -rand(0, 10),
+                age: -rand(0, 3),
                 depth: rand(0, Math.PI * 2),
                 depthSpeed: rand(0.18, 0.34),
                 depthAmt: rand(0.5, 1.15),
                 colors: this._colorsFor(i),
-                p0: edgePoint(a),
-                p1: { x: rand(-spread, 1 + spread), y: rand(-spread, 1 + spread) },
-                p2: { x: rand(-spread, 1 + spread), y: rand(-spread, 1 + spread) },
-                p3: edgePoint(b),
+                p0: start,
+                p1: p1,
+                p2: p2,
+                p3: end,
                 // multi-turn path + surface corkscrew
                 curlTurns: curlTurns,
                 curlDir: curlDir,
@@ -443,10 +542,51 @@ var RibbonsModern = (function () {
                 curlHarmonic: curlHarmonic,
                 curlHarmonicMix: curlHarmonicMix,
                 curlPhase: rand(0, Math.PI * 2),
+                curlComplexity: curlComplexity,
+                pathFigure: pathFigure,
                 twistTurns: twistTurns,
                 twistDir: twistDir,
                 twistPhase: rand(0, Math.PI * 2)
             };
+            this._calibrateCurl(ribbon);
+            return ribbon;
+        },
+        /**
+         * Reduce curl amplitude until the tightest point of the sampled path
+         * has a radius larger than the ribbon width. This keeps high-curl
+         * ribbons smooth and prevents hairpin folds/glitches while still
+         * allowing broad coil/spring shapes.
+         */
+        _calibrateCurl: function (r) {
+            if (!r || Math.abs(r.curlTurns || 0) < 0.15) return;
+            var targetRadius = Math.max(36, (r.width || 24) * 1.2);
+            var originalAmp = r.curlAmp;
+            var samples = 200;
+            for (var attempt = 0; attempt < 12; attempt++) {
+                var pts = [];
+                var i;
+                for (i = 0; i <= samples; i++) {
+                    pts.push(this._point(r, i / samples));
+                }
+                var minRadius = Infinity;
+                for (i = 1; i < samples; i++) {
+                    var ax = pts[i].x - pts[i - 1].x;
+                    var ay = pts[i].y - pts[i - 1].y;
+                    var bx = pts[i + 1].x - pts[i].x;
+                    var by = pts[i + 1].y - pts[i].y;
+                    var cross = ax * by - ay * bx;
+                    var dot = ax * bx + ay * by;
+                    var turn = Math.abs(Math.atan2(cross, dot));
+                    var seg = (Math.hypot(ax, ay) + Math.hypot(bx, by)) * 0.5;
+                    if (turn > 1e-5 && seg > 1e-4) {
+                        minRadius = Math.min(minRadius, seg / turn);
+                    }
+                }
+                if (minRadius >= targetRadius) return;
+                var floor = originalAmp * 0.2;
+                r.curlAmp = Math.max(floor, r.curlAmp * 0.65);
+                if (r.curlAmp <= floor + 1e-9) return;
+            }
         },
         reset: function () {
             var n = this._options.ribbonCount;
@@ -469,8 +609,8 @@ var RibbonsModern = (function () {
             // Reset so the first recolored ribbon is free to pick any color
             this._lastColorIndex = -1;
             this._lastHue = null;
-            this._ribbons.forEach(function (ribbon) {
-                ribbon.colors = self._colorsFor();
+            this._ribbons.forEach(function (ribbon, index) {
+                ribbon.colors = self._colorsFor(index);
             });
         },
         _onResize: function () {
@@ -546,6 +686,11 @@ var RibbonsModern = (function () {
             // so curl / width offsets stay circular (not stretched) on ultra-wide canvases.
             var tnx = 3 * v * v * (r.p1.x - r.p0.x) + 6 * v * u * (r.p2.x - r.p1.x) + 3 * u * u * (r.p3.x - r.p2.x);
             var tny = 3 * v * v * (r.p1.y - r.p0.y) + 6 * v * u * (r.p2.y - r.p1.y) + 3 * u * u * (r.p3.y - r.p2.y);
+            // Second derivative (curvature of the base cubic).
+            var tn2x = 6 * v * (r.p2.x - 2 * r.p1.x + r.p0.x)
+                + 6 * u * (r.p3.x - 2 * r.p2.x + r.p1.x);
+            var tn2y = 6 * v * (r.p2.y - 2 * r.p1.y + r.p0.y)
+                + 6 * u * (r.p3.y - 2 * r.p2.y + r.p1.y);
             var tpx = tnx * W;
             var tpy = tny * H;
             var tlen = Math.hypot(tpx, tpy) || 1;
@@ -560,24 +705,91 @@ var RibbonsModern = (function () {
             // Clamp A so the inequality always holds → path stays regular (no folds).
             var turns = r.curlTurns || 0;
             var turnsAbs = Math.abs(turns);
-            var phase = (r.curlPhase || 0) + u * Math.PI * 2 * turns * (r.curlDir || 1);
-            var wave = Math.sin(phase); // fundamental only — harmonics seed sharp kinks
+            var curlComplexity = clamp(r.curlComplexity || 0, 0, 1);
+            var timePhase = (r.depthTime || 0) * 0.55 + (r.curlPhase || 0);
+            var phaseMod = curlComplexity * 0.22 * Math.sin(timePhase);
+            var phase = (r.curlPhase || 0)
+                + u * Math.PI * 2 * turns * (r.curlDir || 1)
+                + phaseMod;
             var uu = clamp(u, 0, 1);
+            var figure = r.pathFigure || "sine";
+            var fundamental = Math.sin(phase);
+            var wave = fundamental;
+            if (curlComplexity > 0) {
+                // Slow sub-harmonic serpentine component: more intricate
+                // high-curl motion without high-frequency edge kinks.
+                wave += curlComplexity * 0.16
+                    * Math.sin(phase * 0.5 + timePhase * 0.7);
+                wave /= 1 + curlComplexity * 0.16;
+            }
+            var longitudinal = 0;
+            var figureSpeed = 1;
+            if (figure === "double") {
+                wave = (wave + 0.35 * Math.sin(phase * 2 + (r.curlPhase || 0) * 0.31)) / 1.35;
+                figureSpeed = 1.22;
+            } else if (figure === "helix") {
+                longitudinal = 0.35 * Math.cos(phase);
+                figureSpeed = 1.07;
+            } else if (figure === "figure8") {
+                longitudinal = 0.3
+                    * Math.sin(phase * 2 + (r.curlPhase || 0) * 0.47);
+                figureSpeed = 1.17;
+            } else if (figure === "coil") {
+                longitudinal = 0.22 * Math.cos(phase * 2);
+                figureSpeed = 1.1;
+            } else if (figure === "spiral") {
+                wave *= 0.55 + 0.45 * uu;
+                figureSpeed = 1.15;
+            } else if (figure === "loop") {
+                // Quadrature pair traces full loops rather than a flat wave.
+                longitudinal = 0.9 * Math.cos(phase);
+                figureSpeed = Math.sqrt(1 + 0.9 * 0.9);
+            }
             var spiralBias = clamp(r.spiralBias || 0, 0, 1);
-            // Envelope: soft ends; spiral bias grows gently (not enough to break the speed bound)
-            var envelope = Math.sin(Math.PI * uu) * (1 - spiralBias * 0.45)
-                + Math.pow(uu, 0.85) * spiralBias * 0.45;
+            // Full-length coil amplitude with only a gentle, low-slope
+            // variation. Tapering the amplitude steeply at the ends created
+            // lateral velocity spikes and hairpin kinks in high-curl paths.
+            var envelope = 1 + spiralBias * 0.2 * Math.sin(Math.PI * uu);
             var unit = Math.min(W, H);
-            var ampPx = Math.min(0.2, (r.curlAmp || 0)) * envelope * unit;
+            var slowAmp = 1 + curlComplexity * 0.15
+                * Math.sin((r.depthTime || 0) * 0.4 + (r.curlPhase || 0) * 0.6);
+            var ampPx = Math.min(0.9, (r.curlAmp || 0)) * envelope * unit * slowAmp;
             // Longitudinal speed of the base cubic in pixel space (px per unit-u)
             var longMag = Math.hypot(tnx * W, tny * H) || 1;
             if (turnsAbs > 0.02) {
-                // Safety 0.7: leave headroom for envelope slope + cubic curvature
-                var maxAmp = (longMag * 0.7) / (Math.PI * 2 * turnsAbs);
-                if (ampPx > maxAmp) ampPx = maxAmp;
+                // Two independent limits:
+                // 1) lateral speed must stay below longitudinal speed (no cusp),
+                // 2) the normal offset must stay inside the base curvature radius
+                //    (otherwise the offset curve folds back on itself).
+                var speedLimit = (longMag * 0.6) / (Math.PI * 2 * turnsAbs * figureSpeed);
+                var px = tnx * W;
+                var py = tny * H;
+                var qx = tn2x * W;
+                var qy = tn2y * H;
+                var speedSq = px * px + py * py;
+                var crossCurv = Math.abs(px * qy - py * qx);
+                var curvature = speedSq > 1e-6
+                    ? crossCurv / Math.pow(speedSq, 1.5)
+                    : 0;
+                var radius = curvature > 1e-9 ? 1 / curvature : Infinity;
+                var curveLimit = radius * 0.55;
+                // The lateral wave has its own curvature. Keep its minimum
+                // radius comparable to the ribbon width so the inner edge
+                // cannot collapse inside a tight coil.
+                var minCoilRadius = Math.max(28, r.width * 0.9);
+                var waveLimit = speedSq /
+                    (Math.pow(Math.PI * 2 * turnsAbs * figureSpeed, 2) * minCoilRadius);
+                var limit = Math.min(speedLimit, Math.min(curveLimit, waveLimit));
+
+                // Soft min, but keep the kernel small relative to the limit so the
+                // result never exceeds the safe radius significantly.
+                var softness = Math.min(unit * 0.03, Math.max(2, limit * 0.3));
+                var mix = clamp(0.5 + 0.5 * (limit - ampPx) / softness, 0, 1);
+                ampPx = limit * (1 - mix) + ampPx * mix - softness * mix * (1 - mix);
             }
-            var x = nx * W + ppx * wave * ampPx;
-            var y = ny * H + ppy * wave * ampPx;
+            var along = longitudinal * ampPx * 0.8;
+            var x = nx * W + ppx * wave * ampPx + tpx * along;
+            var y = ny * H + ppy * wave * ampPx + tpy * along;
             // Gentler depth — high-frequency z was causing shimmering kinks under perspective
             var z = Math.sin(r.depthTime + r.depth + u * 1.8) * r.depthAmt * 2.2;
             if (r.twistTurns) {
@@ -645,7 +857,7 @@ var RibbonsModern = (function () {
             var fx = 0;
             if (opts.edgeSoftness) fx += clamp(opts.edgeSoftness, 0, 100) / 100;
             if (opts.shaftBrightness) fx += clamp(opts.shaftBrightness, 0, 100) / 100;
-            var sampleCount = Math.round(clamp(80 + complexity * 40, 80, 180));
+            var sampleCount = Math.round(clamp(100 + complexity * 55, 100, 240));
             var pts = [];
             var i;
             for (i = 0; i <= sampleCount; i++) {
@@ -654,13 +866,38 @@ var RibbonsModern = (function () {
             }
             // Light centerline smooth only
             if (pts.length > 4) {
-                for (var cpass = 0; cpass < 2; cpass++) {
+                for (var cpass = 0; cpass < 3; cpass++) {
                     var sx = pts.map(function (p) { return p.x; });
                     var sy = pts.map(function (p) { return p.y; });
                     for (i = 1; i < pts.length - 1; i++) {
                         pts[i].x = sx[i] * 0.5 + (sx[i - 1] + sx[i + 1]) * 0.25;
                         pts[i].y = sy[i] * 0.5 + (sy[i - 1] + sy[i + 1]) * 0.25;
                     }
+                }
+
+                // Curvature guard: high curl can still leave sharp, edgy
+                // hairpins after plain smoothing. Round only corners whose
+                // radius is below roughly one ribbon width, keeping broad
+                // coils/springs intact.
+                var minTurnRadius = Math.max(30, r.width * 0.95);
+                for (var gpass = 0; gpass < 6; gpass++) {
+                    var gx = pts.map(function (p) { return p.x; });
+                    var gy = pts.map(function (p) { return p.y; });
+                    var adjusted = false;
+                    for (i = 1; i < pts.length - 1; i++) {
+                        var ax2 = gx[i] - gx[i - 1];
+                        var ay2 = gy[i] - gy[i - 1];
+                        var bx2 = gx[i + 1] - gx[i];
+                        var by2 = gy[i + 1] - gy[i];
+                        var turn2 = Math.abs(Math.atan2(ax2 * by2 - ay2 * bx2, ax2 * bx2 + ay2 * by2));
+                        var seg2 = (Math.hypot(ax2, ay2) + Math.hypot(bx2, by2)) * 0.5;
+                        if (turn2 > 1e-4 && seg2 / turn2 < minTurnRadius) {
+                            pts[i].x = gx[i] * 0.35 + (gx[i - 1] + gx[i + 1]) * 0.325;
+                            pts[i].y = gy[i] * 0.35 + (gy[i - 1] + gy[i + 1]) * 0.325;
+                            adjusted = true;
+                        }
+                    }
+                    if (!adjusted) break;
                 }
             }
             var left = [];
@@ -681,13 +918,18 @@ var RibbonsModern = (function () {
                 smoothTx[i] = sdx / slen;
                 smoothTy[i] = sdy / slen;
             }
-            // One light tangent smooth pass
-            for (i = 1; i < nPts - 1; i++) {
-                var bx = smoothTx[i - 1] + smoothTx[i] * 2 + smoothTx[i + 1];
-                var by = smoothTy[i - 1] + smoothTy[i] * 2 + smoothTy[i + 1];
-                var bl = Math.hypot(bx, by) || 1;
-                smoothTx[i] = bx / bl;
-                smoothTy[i] = by / bl;
+            // Two light tangent smooth passes — high-curl paths otherwise
+            // produce edgy normal changes between samples.
+            for (var tpass = 0; tpass < 2; tpass++) {
+                var txPrev = smoothTx.slice();
+                var tyPrev = smoothTy.slice();
+                for (i = 1; i < nPts - 1; i++) {
+                    var bx = txPrev[i - 1] + txPrev[i] * 2 + txPrev[i + 1];
+                    var by = tyPrev[i - 1] + tyPrev[i] * 2 + tyPrev[i + 1];
+                    var bl = Math.hypot(bx, by) || 1;
+                    smoothTx[i] = bx / bl;
+                    smoothTy[i] = by / bl;
+                }
             }
             // Parallel-transport normals
             var nrmX = new Array(nPts);
@@ -1179,6 +1421,8 @@ var RibbonsModern = (function () {
             var prevMaxTwist = this._options.maxTwist;
             var prevCurlAmp = this._options.curlAmplitude;
             var prevSingle = this._options.singleColor;
+            var prevCustomEnabled = this._options.customColorsEnabled;
+            var prevCustomColors = JSON.stringify(this._options.customColors || []);
             this.setOptions(options);
 
             var singleMode = function (sc) {
@@ -1192,10 +1436,14 @@ var RibbonsModern = (function () {
             var needReset =
                 this._options.mode !== prevMode ||
                 singleModeChanged;
+            var customChanged =
+                this._options.customColorsEnabled !== prevCustomEnabled ||
+                JSON.stringify(this._options.customColors || []) !== prevCustomColors;
             var needRecolor =
                 this._options.backgroundMode !== prevBg ||
                 this._options.mode !== prevMode ||
-                this._options.singleColor !== prevSingle;
+                this._options.singleColor !== prevSingle ||
+                customChanged;
 
             if (needReset) {
                 this.reset();
@@ -1227,9 +1475,18 @@ var RibbonsModern = (function () {
                 curlAmpOpt !== prevCurlAmp;
             var twistChanged = minTwist !== prevMinTwist || maxTwist !== prevMaxTwist;
 
+            if (curlChanged) {
+                // Curl/amplitude determine the figure and its safe amplitude.
+                // Rebuild so live previews pick new figures immediately.
+                this.reset();
+                if (this._options.backgroundMode !== prevBg) {
+                    this._drawBackground();
+                }
+                return;
+            }
+
             // Remap existing ribbons into new ranges (keep age / path / colors)
             if (widthChanged || curlChanged || twistChanged) {
-                var oldCurlSpan = (prevMaxCurl - prevMinCurl) || 1e-6;
                 var oldTwistSpan = (prevMaxTwist - prevMinTwist) || 1e-6;
                 this._ribbons.forEach(function (r) {
                     if (widthChanged) {
@@ -1237,19 +1494,6 @@ var RibbonsModern = (function () {
                         var oldWSpan = (prevMaxW - prevMinW) || 1e-6;
                         var wt = clamp((r.width - prevMinW) / oldWSpan, 0, 1);
                         r.width = minW + wt * (maxW - minW);
-                    }
-                    if (curlChanged) {
-                        var ct = clamp((r.curlTurns - prevMinCurl) / oldCurlSpan, 0, 1);
-                        r.curlTurns = minCurl + ct * (maxCurl - minCurl);
-                        var baseAmp = curlAmpOpt * (0.75 + 0.35 * (r.id || currentRandom()));
-                        // id is random 0..1 — use stable-ish factor from existing curlAmp if present
-                        if (typeof r.curlAmp === 'number' && prevCurlAmp > 0) {
-                            baseAmp = curlAmpOpt * clamp(r.curlAmp / (prevCurlAmp * 0.9 || 1e-6), 0.6, 1.3);
-                        }
-                        r.curlAmp = Math.min(
-                            0.2,
-                            baseAmp * (0.4 + 0.28 * clamp(r.curlTurns, 0, 1.5))
-                        );
                     }
                     if (twistChanged) {
                         var tt = clamp((r.twistTurns - prevMinTwist) / oldTwistSpan, 0, 1);

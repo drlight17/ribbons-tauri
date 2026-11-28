@@ -124,9 +124,28 @@ button.hidden {
     filter: invert(1);
     opacity: .4;
 }
-.transparent .datetime-container,
-.glass .datetime-container {
+.transparent .datetime-container {
     background-color: #b1b1b1!important;
+}
+
+/* Glass gets a dark translucent card so white datetime text stays readable
+ * over bright/blurred desktop backgrounds. */
+.glass .datetime-container {
+    background-color: rgb(20 24 34 / 78%)!important;
+    border: 1px solid rgb(255 255 255 / 14%);
+}
+
+.glass .date {
+    color: rgb(255 255 255 / 82%);
+}
+
+.glass .time {
+    color: #fff;
+}
+
+.glass .date,
+.glass .time {
+    text-shadow: 0 1px 3px rgb(0 0 0 / 58%);
 }
 .datetime-container.front {
     z-index: 4;
@@ -552,6 +571,47 @@ body.settings .check-row {
     gap: 8px;
     font-size: 12px;
     margin-bottom: 8px;
+}
+
+body.settings .custom-colors-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
+    gap: 8px;
+    margin: 4px 0 10px;
+}
+
+body.settings .custom-colors-grid[hidden] {
+    display: none;
+}
+
+body.settings .custom-color-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    color: var(--muted);
+    font-size: 11px;
+}
+
+body.settings .custom-color-item input[type="color"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 36px;
+    height: 28px;
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: transparent;
+    cursor: pointer;
+}
+
+body.settings .custom-color-item input[type="color"]::-webkit-color-swatch-wrapper {
+    padding: 2px;
+}
+
+body.settings .custom-color-item input[type="color"]::-webkit-color-swatch {
+    border: none;
+    border-radius: 6px;
 }
 
 body.settings .check-row:last-child {

@@ -10,7 +10,7 @@
     "rust"
   ],
   "type": "module",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "author": "Yuri Samoilov <root@drlight.fun>",
   "homepage": "https://github.com/drlight17/ribbons-tauri",
   "apiLink": "https://api.github.com/repos/drlight17/ribbons-tauri",

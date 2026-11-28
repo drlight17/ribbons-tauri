@@ -105,6 +105,7 @@
   "group_system": "System",
   "ui_theme": "UI theme",
   "custom_hue": "Custom hue (0–360)",
+  "custom_colors": "Custom color per ribbon",
   "animationSpeed": "Speed multiplier (modern)",
   "label_min": "Min",
   "label_max": "Max",
@@ -122,7 +123,7 @@
   "vpos_center": "Center",
   "vpos_bottom": "Bottom",
   "hint_colorCycleSpeed": "Only with random color (classic)",
-  "hint_ribbonCount": "Menu: 3 / 5 / 7 / 9 · tricolor usually 3",
+  "hint_ribbonCount": "1 to 20 ribbons",
   "hint_opacity": "Menu: 100 / 70 / 5",
   "hint_blur": "Additional  Ribbons glow effect (performance demanding!)",
   "hint_hw_acc": "Takes effect after restart",
@@ -151,5 +152,6 @@
   "newer_version": "You are using a newer version",
   "new_version_remember": "Don't ask until the next release",
   "update_wait": "Please wait while the update is downloading and installing.",
-  "update_unsupported": "Automatic updates are not supported for this installation. Opening the release page instead."
+  "update_unsupported": "Automatic updates are not supported for this installation. Opening the release page instead.",
+  "custom_colors_hint": "Off: random colors; On: pick a color for each ribbon"
 }

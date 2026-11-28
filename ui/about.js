@@ -6,6 +6,19 @@ let currentLocale = 'en';
 let dict = {};
 let aboutInfo = {};
 
+function resolveUiTheme(uiTheme, backgroundMode, theme) {
+    if (uiTheme === 'light' || uiTheme === 'dark') return uiTheme;
+    const src = backgroundMode || theme || 'dark';
+    return src === 'light' || src === 'lightGradient' ? 'light' : 'dark';
+}
+
+function applyUiTheme(uiTheme, backgroundMode, theme) {
+    document.documentElement.setAttribute(
+        'data-theme',
+        resolveUiTheme(uiTheme, backgroundMode, theme)
+    );
+}
+
 function openExternal(url) {
     if (!url) return;
     invoke('open_external', { url }).catch((err) => console.warn('Open URL failed:', err));
@@ -52,6 +65,7 @@ function applyI18n() {
 
 try {
     aboutInfo = await invoke('get_about_info');
+    applyUiTheme(aboutInfo.ui_theme, aboutInfo.backgroundMode, aboutInfo.theme);
     if (aboutInfo.name) $('appName').textContent = aboutInfo.name;
     if (aboutInfo.author) $('author').textContent = aboutInfo.author;
     if (aboutInfo.license) $('license').textContent = aboutInfo.license;
@@ -73,6 +87,14 @@ applyI18n();
 on('ribbons-i18n-changed', async (locale) => {
     await loadLocale(locale);
     applyI18n();
+});
+
+on('ribbons-theme-changed', (payload) => {
+    applyUiTheme(
+        payload && payload.ui_theme,
+        payload && payload.backgroundMode,
+        payload && payload.theme
+    );
 });
 
 $('close').addEventListener('click', () => closeCurrentWindow());

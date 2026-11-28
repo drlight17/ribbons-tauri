@@ -205,6 +205,15 @@ function applyI18n() {
 }
 
 /** Defaults — keys match config.json sample */
+const DEFAULT_CUSTOM_COLORS = [
+  '#ff4d4d', '#ff9f1a', '#ffe14d', '#4dff88',
+  '#2de2e6', '#4d8dff', '#8a5cff', '#ff5cd0',
+  '#ff7a7a', '#c6ff4d', '#4dffd2', '#d0d0ff',
+  '#ffb84d', '#9dff4d', '#4dfff0', '#4dc3ff',
+  '#b44dff', '#ff4da6', '#e0e0ff', '#ffd6a3'
+];
+let customColorValues = DEFAULT_CUSTOM_COLORS.slice();
+
 const DEFAULTS = {
   locale: 'en',
   engine: 'modern',
@@ -214,9 +223,11 @@ const DEFAULTS = {
   stretched_mode: false,
   selected_displays: 'all',
   singleColor: false,
+  customColorsEnabled: false,
+  customColors: DEFAULT_CUSTOM_COLORS.slice(),
   colorCycleSpeed: 3,
-  ribbonCount: 5,
-  horizontalSpeed: 1.5,
+  ribbonCount: 10,
+  horizontalSpeed: 2.8,
   endless: true,
   freezeBeforeFade: true,
   opacity: 85 ,
@@ -227,7 +238,7 @@ const DEFAULTS = {
   minLength: 1,
   maxLength: 6,
   minWidth: 25,
-  maxWidth: 45,
+  maxWidth: 60,
   minCurl: 1.0,
   maxCurl: 3.0,
   minTwist: 0,
@@ -328,16 +339,39 @@ function formatHorizontalSpeedLabel(v, engine) {
   return Number(v).toFixed(1).replace(/\.0$/, '') + '×';
 }
 
+// Progressive idle-time scale: 5/10/30/60 seconds, then 2–60 minutes.
+const IDLE_STEPS = [
+  5, 10, 30, 60,
+  ...Array.from({ length: 59 }, (_, index) => (index + 2) * 60)
+];
+
+function idleSecondsFromIndex(index) {
+  const i = Math.max(0, Math.min(IDLE_STEPS.length - 1, Math.round(Number(index) || 0)));
+  return IDLE_STEPS[i];
+}
+
+function idleIndexFromSeconds(seconds) {
+  const value = Math.max(5, Math.min(3600, Math.round(Number(seconds) || 60)));
+  let bestIndex = 0;
+  let bestDiff = Infinity;
+  IDLE_STEPS.forEach((step, index) => {
+    const diff = Math.abs(step - value);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      bestIndex = index;
+    }
+  });
+  return bestIndex;
+}
+
 const RANGE_FMT = {
   ribbonCount: (v) => String(Math.round(v)),
   horizontalSpeed: (v) => formatHorizontalSpeedLabel(v, getEngine()),
 
   idle_time: (v) => {
-    const s = Math.round(Number(v) || 0);
+    const s = idleSecondsFromIndex(v);
     if (s < 60) return s + ' s';
-    const m = s / 60;
-    if (Number.isInteger(m)) return m + ' min';
-    return (Math.round(m * 10) / 10) + ' min';
+    return s / 60 + ' min';
   },
   opacity: (v) => Math.round(v) + '%',
   glow: (v) => String(Math.round(v)),
@@ -353,7 +387,6 @@ const RANGE_FMT = {
   curlAmplitude: (v) => Number(v).toFixed(2),
   minTwist: (v) => Number(v).toFixed(2),
   maxTwist: (v) => Number(v).toFixed(2),
-  singleColorCustom: (v) => String(Math.round(v)),
   colorSaturation: (v) => Math.round(v) + '%',
   colorBrightness: (v) => Math.round(v) + '%',
   colorAlpha: (v) => Number(v).toFixed(2),
@@ -381,6 +414,54 @@ function applyUiTheme(themeName) {
   document.body.setAttribute('data-theme', tname);
 }
 
+const MODERN_ENGINE_DEFAULTS = {
+  endless: true,
+  freezeBeforeFade: true,
+  ribbonCount: 10,
+  horizontalSpeed: 2.8,
+  opacity: 85,
+  glow: 26,
+  blur: 0,
+  shaftBrightness: 100,
+  edgeSoftness: 100,
+  minLength: 1,
+  maxLength: 6,
+  minWidth: 25,
+  maxWidth: 60,
+  minCurl: 1.0,
+  maxCurl: 3.0,
+  minTwist: 0,
+  maxTwist: 0,
+  curlAmplitude: 0.22
+};
+
+const CLASSIC_ENGINE_DEFAULTS = {
+  ribbonCount: 5,
+  colorCycleSpeed: 3,
+  colorSaturation: 60,
+  colorBrightness: 50,
+  colorAlpha: 1,
+  verticalPosition: 'random',
+  parallaxAmount: -0.3,
+  strokeSize: 1,
+  ribbonBlur: 30,
+  animateSections: true
+};
+
+function applyEngineDefaults(engine) {
+  const defaults = engine === 'classic' ? CLASSIC_ENGINE_DEFAULTS : MODERN_ENGINE_DEFAULTS;
+  Object.entries(defaults).forEach(([id, value]) => {
+    const el = $(id);
+    if (!el) return;
+    if (el.type === 'checkbox') {
+      el.checked = !!value;
+    } else {
+      el.value = String(value);
+    }
+  });
+
+}
+
 function setEngine(engine, { silent } = {}) {
   const eng = engine === 'classic' ? 'classic' : 'modern';
   $('engine').value = eng;
@@ -403,117 +484,92 @@ function setEngine(engine, { silent } = {}) {
   if (sub) {
     sub.textContent = eng === 'classic' ? t('preview_subtitle_classic') : t('preview_subtitle_modern');
   }
+  if (!silent) {
+    applyEngineDefaults(eng);
+  }
   updateColorUi();
   syncSpeedSliderMode(eng);
-  if (!silent) applyPreview(true);
-}
-
-function parseSingleColor() {
-  const mode = $('singleColorMode')?.value;
-  if (mode === 'false' || mode == null) return false;
-  if (mode === 'custom') return +($('singleColorCustom')?.value || 200);
-  return +mode;
-}
-
-function drawHueSpectrum() {
-  const canvas = $('hueCanvas');
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  const w = canvas.width;
-  const h = canvas.height;
-  const grad = ctx.createLinearGradient(0, 0, w, 0);
-  for (let i = 0; i <= 12; i++) {
-    grad.addColorStop(i / 12, `hsl(${(i / 12) * 360} 90% 50%)`);
-  }
-  ctx.clearRect(0, 0, w, h);
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, w, h);
-}
-
-function setCustomHue(hue, { silent } = {}) {
-  const h = Math.max(0, Math.min(360, Math.round(+hue || 0)));
-  const el = $('singleColorCustom');
-  if (el) el.value = String(h);
-  const val = $('singleColorCustomVal');
-  if (val) val.textContent = h + '°';
-  const preview = $('huePreview');
-  if (preview) preview.style.background = `hsl(${h} 90% 50%)`;
-  const canvas = $('hueCanvas');
-  const cursor = $('hueCursor');
-  if (canvas && cursor) {
-    const rect = canvas.getBoundingClientRect();
-    const trackW = rect.width || canvas.width;
-    const x = (h / 360) * trackW;
-    // cursor is positioned relative to hue-picker; canvas is first cell
-    cursor.style.left = canvas.offsetLeft + x + 'px';
-    cursor.style.top = canvas.offsetTop + 'px';
-    cursor.style.height = (canvas.offsetHeight || 28) + 'px';
-  }
-  if (!silent && typeof applyPreview === 'function') {
-    // applied by pointer handlers
-  }
-}
-
-function hueFromPointer(clientX) {
-  const canvas = $('hueCanvas');
-  if (!canvas) return 200;
-  const rect = canvas.getBoundingClientRect();
-  const t = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-  return Math.round(t * 360);
-}
-
-function bindHuePicker() {
-  const canvas = $('hueCanvas');
-  if (!canvas || canvas.dataset.bound === '1') return;
-  canvas.dataset.bound = '1';
-  drawHueSpectrum();
-
-  let dragging = false;
-  const pick = (e) => {
-    if ($('singleColorMode')?.value !== 'custom') return;
-    const x = e.touches ? e.touches[0].clientX : e.clientX;
-    setCustomHue(hueFromPointer(x));
+  if (!silent) {
+    const speed = $('horizontalSpeed');
+    if (speed) {
+      speed.value = eng === 'classic'
+        ? String(classicSpeedIndex('normal'))
+        : String(MODERN_ENGINE_DEFAULTS.horizontalSpeed);
+    }
+    updateLabels();
     applyPreview(true);
-  };
-  canvas.addEventListener('pointerdown', (e) => {
-    dragging = true;
-    canvas.setPointerCapture(e.pointerId);
-    pick(e);
-  });
-  canvas.addEventListener('pointermove', (e) => {
-    if (!dragging) return;
-    pick(e);
-  });
-  canvas.addEventListener('pointerup', () => { dragging = false; });
-  canvas.addEventListener('pointercancel', () => { dragging = false; });
-  window.addEventListener('resize', () => {
-    drawHueSpectrum();
-    setCustomHue($('singleColorCustom')?.value || 200, { silent: true });
+  }
+}
+
+function captureCustomColorValues() {
+  const container = $('customColorsPalette');
+  if (!container) return;
+  container.querySelectorAll('input[type="color"]').forEach((input, index) => {
+    customColorValues[index] = input.value;
   });
 }
 
-function updateColorUi() {
-  bindHuePicker();
-  const mode = $('singleColorMode')?.value;
-  const customRow = $('customHueRow');
-  const isCustom = mode === 'custom';
-  if (customRow) {
-    customRow.hidden = false;
-    customRow.classList.toggle('is-disabled', !isCustom);
+function setCustomColorValues(colors) {
+  const source = Array.isArray(colors) && colors.length ? colors : DEFAULT_CUSTOM_COLORS;
+  customColorValues = Array.from({ length: 20 }, (_, index) => {
+    const value = source[index];
+    return typeof value === 'string' && value
+      ? value
+      : DEFAULT_CUSTOM_COLORS[index % DEFAULT_CUSTOM_COLORS.length];
+  });
+}
+
+function renderCustomColorsPalette(count, force = false) {
+  const container = $('customColorsPalette');
+  if (!container) return;
+
+  const total = Math.max(1, Math.min(20, Number(count) || 1));
+  if (!force) {
+    captureCustomColorValues();
+    if (container.childElementCount === total) return;
   }
+  container.textContent = '';
+
+  for (let index = 0; index < total; index += 1) {
+    const item = document.createElement('label');
+    item.className = 'custom-color-item';
+
+    const input = document.createElement('input');
+    input.type = 'color';
+    input.value = customColorValues[index] || DEFAULT_CUSTOM_COLORS[index % DEFAULT_CUSTOM_COLORS.length];
+    input.dataset.index = String(index);
+    input.addEventListener('input', () => {
+      customColorValues[index] = input.value;
+      applyPreview(false);
+    });
+
+    const label = document.createElement('span');
+    label.textContent = String(index + 1);
+
+    item.append(input, label);
+    container.appendChild(item);
+  }
+}
+
+function readCustomColors() {
+  captureCustomColorValues();
+  return customColorValues.slice();
+}
+
+function updateColorUi(forcePalette = false) {
+  const customEnabled = !!$('customColorsEnabled')?.checked;
   const cycle = $('colorCycleSpeed');
-  if (cycle) {
-    const rainbow = mode === 'false';
-    cycle.disabled = !rainbow || getEngine() === 'modern';
-  }
+  if (cycle) cycle.disabled = customEnabled || getEngine() === 'modern';
   const count = $('ribbonCount');
-  if (count && mode === '667') {
-    count.min = 3;
-    if (+count.value < 3) count.value = 3;
-  } else if (count) {
-    count.min = 1;
+  if (count) count.min = 1;
+
+  const palette = $('customColorsPalette');
+  if (palette) {
+    palette.hidden = !customEnabled;
+    if (customEnabled) {
+      renderCustomColorsPalette(count ? count.value : 1, forcePalette);
+    }
   }
-  setCustomHue($('singleColorCustom')?.value || 200, { silent: true });
 }
 
 function updateLabels() {
@@ -705,7 +761,7 @@ function parseSelectedDisplaysFromStore(val) {
 function readForm() {
   updateColorUi();
   const engine = getEngine();
-  const singleColor = parseSingleColor();
+  const singleColor = false;
   const ribbonCount = +$('ribbonCount').value;
   const engNow = engine;
   let horizontalSpeed;
@@ -723,13 +779,15 @@ function readForm() {
     stretched_mode: $('stretched_mode').checked,
     selected_displays: readSelectedDisplays(),
     singleColor,
+    customColorsEnabled: !!$('customColorsEnabled')?.checked,
+    customColors: readCustomColors(),
     ribbonCount,
     horizontalSpeed,
     show_datetime: $('show_datetime').checked,
     datetime_front: $('datetime_front').checked,
     randomize_datetime_pos: !!$('stretched_mode')?.checked || !!$('randomize_datetime_pos')?.checked,
     datetime_pos: $('datetime_pos')?.value || 'center',
-    idle_time: Math.max(5, Math.min(3600, Math.round(+$('idle_time').value || 60))),
+    idle_time: idleSecondsFromIndex($('idle_time').value),
     media_detect: $('media_detect').checked,
     fullscreen_detect: $('fullscreen_detect').checked,
     user_activity: $('user_activity').checked,
@@ -762,7 +820,7 @@ function readForm() {
       curlAmplitude: +$('curlAmplitude').value,
       minTwist: +$('minTwist').value,
       maxTwist: +$('maxTwist').value,
-      mode: singleColor === 667 ? 'tricolor' : 'classic'
+      mode: 'classic'
     });
     if (data.minLength > data.maxLength) {
       data.maxLength = data.minLength;
@@ -780,10 +838,6 @@ function readForm() {
       data.maxTwist = data.minTwist;
       $('maxTwist').value = data.maxTwist;
     }
-    if (singleColor === 667 && data.ribbonCount < 3) {
-      data.ribbonCount = 3;
-      $('ribbonCount').value = 3;
-    }
   } else {
     // Same backgroundMode options as modern (engine paints all modes on bg canvas)
     const bgMode = $('backgroundMode')?.value || 'dark';
@@ -792,7 +846,7 @@ function readForm() {
     Object.assign(data, {
       theme: themeVal,
       backgroundMode: bgMode,
-      colorCycleSpeed: singleColor ? 0 : +($('colorCycleSpeed')?.value || 3),
+      colorCycleSpeed: +($('colorCycleSpeed')?.value || 3),
       colorSaturation: +($('colorSaturation')?.value ?? 60),
       colorBrightness: +($('colorBrightness')?.value ?? 50),
       colorAlpha: +($('colorAlpha')?.value ?? 1),
@@ -803,10 +857,6 @@ function readForm() {
       animateSections: $('animateSections')?.checked !== false,
       ...(CLASSIC_SPEED_PRESETS[horizontalSpeed] || CLASSIC_SPEED_PRESETS.normal)
     });
-    if (singleColor === 667 && data.ribbonCount < 3) {
-      data.ribbonCount = 3;
-      $('ribbonCount').value = 3;
-    }
   }
 
   const resolved = resolveUiTheme(ui_theme, data.backgroundMode, data.theme);
@@ -824,16 +874,8 @@ async function writeForm(opts) {
     await loadLocale(wantLocale);
   }
 
-  const sc = o.singleColor;
-  const known = [false, 667, 666, 360, 60, 120, 180, 240, 300];
-  if (sc === false || sc === undefined || sc === null || sc === 0) {
-    $('singleColorMode').value = 'false';
-  } else if (known.includes(sc) || known.includes(+sc)) {
-    $('singleColorMode').value = String(sc);
-  } else {
-    $('singleColorMode').value = 'custom';
-    setCustomHue(+sc || 200);
-  }
+  $('customColorsEnabled').checked = asBool(o.customColorsEnabled);
+  setCustomColorValues(o.customColors);
 
   $('stretched_mode').checked = asBool(o.stretched_mode);
   {
@@ -863,8 +905,7 @@ async function writeForm(opts) {
   {
     let idle = Number(o.idle_time ?? 60);
     if (!Number.isFinite(idle)) idle = 60;
-    idle = Math.max(5, Math.min(3600, Math.round(idle)));
-    $('idle_time').value = idle;
+    $('idle_time').value = idleIndexFromSeconds(idle);
   }
   $('media_detect').checked = asBool(o.media_detect);
   $('fullscreen_detect').checked = asBool(o.fullscreen_detect);
@@ -912,7 +953,7 @@ async function writeForm(opts) {
   applyUiTheme(resolved);
 
   applyI18n();
-  updateColorUi();
+  updateColorUi(true);
   syncDatetimeDeps();
   updateLabels();
 }
@@ -995,6 +1036,12 @@ function finite(n, fallback) {
   return Number.isFinite(v) ? v : fallback;
 }
 
+function hasCustomColors(data) {
+  return !!data.customColorsEnabled &&
+    Array.isArray(data.customColors) &&
+    data.customColors.length > 0;
+}
+
 function startModern(data) {
   destroyInstance();
   // Wait until preview has a real size (avoids NaN in createLinearGradient)
@@ -1027,8 +1074,9 @@ function startModern(data) {
     singleColor = Number.isFinite(n) ? n : false;
   }
 
+  const customColorsEnabled = hasCustomColors(data);
   const opts = {
-    mode: singleColor === 667 ? 'tricolor' : 'classic',
+    mode: customColorsEnabled ? 'classic' : (singleColor === 667 ? 'tricolor' : 'classic'),
     backgroundMode: previewBackgroundMode(data.backgroundMode),
     ribbonCount: Math.max(1, Math.round(finite(data.ribbonCount, 3))),
     opacity: Math.max(1, Math.min(100, finite(data.opacity, 100))),
@@ -1048,7 +1096,9 @@ function startModern(data) {
     minTwist,
     maxTwist,
     curlAmplitude: Math.max(0, finite(data.curlAmplitude, 0.22)),
-    singleColor,
+    singleColor: customColorsEnabled ? false : singleColor,
+    customColorsEnabled,
+    customColors: customColorsEnabled ? data.customColors : [],
     container: preview,
     // same stacking as controller: bg (z-1) < datetime (-1) < ribbons (0) < datetime.front (4)
     zIndex: 0
@@ -1067,11 +1117,15 @@ function startClassic(data) {
   destroyInstance();
   const speedKey = classicSpeedKey(data.horizontalSpeed);
   const timing = CLASSIC_SPEED_PRESETS[speedKey] || CLASSIC_SPEED_PRESETS.normal;
+  const customColorsEnabled = hasCustomColors(data);
   let sat = (data.colorSaturation ?? 60) + '%';
   let cycle = data.colorCycleSpeed ?? 3;
   let single = data.singleColor;
   if (single === false || single === undefined) single = false;
-  if (single === 666) {
+  if (customColorsEnabled) {
+    single = false;
+    cycle = 0;
+  } else if (single === 666) {
     sat = '0%';
     cycle = 0;
   } else if (single) {
@@ -1095,6 +1149,8 @@ function startClassic(data) {
     glow: classicBlur,
     ribbonBlur: classicBlur,
     singleColor: single,
+    customColorsEnabled,
+    customColors: customColorsEnabled ? data.customColors : [],
     backgroundMode: previewBackgroundMode(data.backgroundMode)
   });
   embedClassicCanvas(instance);
@@ -1133,8 +1189,9 @@ function modernLiveOpts(data) {
   const [minWidth, maxWidth] = clampPair(data.minWidth, data.maxWidth, 10, 30);
   const [minCurl, maxCurl] = clampPair(data.minCurl, data.maxCurl, 0.35, 1);
   const [minTwist, maxTwist] = clampPair(data.minTwist, data.maxTwist, 0, 1);
+  const customColorsEnabled = hasCustomColors(data);
   return {
-    mode: singleColor === 667 ? 'tricolor' : 'classic',
+    mode: customColorsEnabled ? 'classic' : (singleColor === 667 ? 'tricolor' : 'classic'),
     backgroundMode: previewBackgroundMode(data.backgroundMode),
     ribbonCount: Math.max(1, Math.round(finite(data.ribbonCount, 3))),
     opacity: Math.max(1, Math.min(100, finite(data.opacity, 100))),
@@ -1154,20 +1211,38 @@ function modernLiveOpts(data) {
     minTwist,
     maxTwist,
     curlAmplitude: Math.max(0, finite(data.curlAmplitude, 0.22)),
-    singleColor
+    singleColor: customColorsEnabled ? false : singleColor,
+    customColorsEnabled,
+    customColors: customColorsEnabled ? data.customColors : []
   };
 }
 
 /** Live patch classic Ribbons._options (no destroy). Returns false if full restart needed. */
 function patchClassicLive(data) {
   if (!instance || typeof instance.setOptions !== 'function') return false;
+  const customColorsEnabled = hasCustomColors(data);
+  const customColors = customColorsEnabled ? data.customColors : [];
+  const prevCustomEnabled = instance._options && instance._options.customColorsEnabled;
+  const prevCustomColors = JSON.stringify(
+    (instance._options && instance._options.customColors) || []
+  );
+  if (
+    prevCustomEnabled !== customColorsEnabled ||
+    prevCustomColors !== JSON.stringify(customColors)
+  ) {
+    return false;
+  }
+
   const speedKey = classicSpeedKey(data.horizontalSpeed);
   const timing = CLASSIC_SPEED_PRESETS[speedKey] || CLASSIC_SPEED_PRESETS.normal;
   let sat = (data.colorSaturation ?? 60) + '%';
   let cycle = data.colorCycleSpeed ?? 3;
   let single = data.singleColor;
   if (single === false || single === undefined) single = false;
-  if (single === 666) {
+  if (customColorsEnabled) {
+    single = false;
+    cycle = 0;
+  } else if (single === 666) {
     sat = '0%';
     cycle = 0;
   } else if (single) {
@@ -1195,6 +1270,8 @@ function patchClassicLive(data) {
     glow: classicBlur,
     ribbonBlur: classicBlur,
     singleColor: single,
+    customColorsEnabled,
+    customColors,
     backgroundMode: bg
   });
 
@@ -1285,7 +1362,9 @@ function collectForSave() {
     opacity: d.opacity ?? 100,
     stretched_mode: !!d.stretched_mode,
     selected_displays: d.selected_displays == null ? 'all' : d.selected_displays,
-    singleColor: d.singleColor === undefined ? false : d.singleColor,
+    singleColor: false,
+    customColorsEnabled: !!d.customColorsEnabled,
+    customColors: Array.isArray(d.customColors) ? d.customColors.slice() : [],
     ribbonCount: d.ribbonCount,
     colorCycleSpeed: d.colorCycleSpeed ?? 3,
     horizontalSpeed: d.engine === 'classic'
@@ -1370,7 +1449,7 @@ $('ui_theme').addEventListener('change', () => {
 
 const liveIds = [
   'backgroundMode', 'theme', 'stretched_mode', 'displays_mode',
-  'singleColorMode', 'colorCycleSpeed',
+  'customColorsEnabled', 'colorCycleSpeed',
   'ribbonCount', 'horizontalSpeed',
   'endless', 'freezeBeforeFade', 'opacity', 'glow', 'blur', 'shaftBrightness', 'edgeSoftness',
   'minLength', 'maxLength', 'minWidth', 'maxWidth',
@@ -1387,7 +1466,9 @@ liveIds.forEach((id) => {
   if (!el) return;
   const evt = el.type === 'range' || el.type === 'checkbox' ? 'input' : 'change';
   el.addEventListener(evt, () => {
-    if (id === 'singleColorMode') updateColorUi();
+    if (id === 'customColorsEnabled' || id === 'ribbonCount') {
+      updateColorUi();
+    }
     if (id === 'show_datetime' || id === 'randomize_datetime_pos' || id === 'datetime_pos' || id === 'stretched_mode') {
       syncDatetimeDeps();
     }
