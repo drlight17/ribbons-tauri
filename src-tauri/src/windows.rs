@@ -265,10 +265,20 @@ pub fn build_options(app: &AppHandle, display: &DisplayInfo) -> Value {
         "backgroundMode": background_mode,
         "glassBackground": glass_background,
         "ui_theme": ui_theme,
-        "ribbonCount": store.get_u64_or("ribbonCount", 3),
+        "ribbonCount": store.get_u64_or("ribbonCount", 3).clamp(1, 20),
         "colorCycleSpeed": store.get_f64_or("colorCycleSpeed", 3.0),
+        "colorSaturation": store.get_f64_or("colorSaturation", 60.0),
+        "colorBrightness": store.get_f64_or("colorBrightness", 50.0),
+        "colorAlpha": store.get_f64_or("colorAlpha", 1.0),
+        "verticalPosition": store.get_str("verticalPosition").unwrap_or_else(|| "random".into()),
+        "strokeSize": store.get_f64_or("strokeSize", 1.0),
+        "parallaxAmount": store.get_f64_or("parallaxAmount", -0.3),
+        "animateSections": store.get_bool_or("animateSections", true),
+        "ribbonBlur": store.get_f64_or("ribbonBlur", 30.0),
         "horizontalSpeed": store.get("horizontalSpeed").cloned().unwrap_or_else(|| json!("normal")),
         "singleColor": store.get("singleColor").cloned().unwrap_or(Value::Bool(false)),
+        "customColorsEnabled": store.get_bool_or("customColorsEnabled", false),
+        "customColors": store.get("customColors").cloned().unwrap_or_else(|| json!([])),
         "locale": store.get_str("locale").unwrap_or_else(|| "en".into()),
         "datetime_front": store.get_bool_or("datetime_front", false),
         "show_datetime": store.get_bool_or("show_datetime", false)
@@ -406,6 +416,7 @@ pub fn start_screensaver(app: &AppHandle, id: &str, force: bool) {
     #[cfg(target_os = "macos")]
     write_log(app, format!("macOS: showing screensaver window {label}"));
     let _ = window.show();
+    let _ = window.set_cursor_visible(false);
     let _ = window.set_focus();
     let _ = window.set_always_on_top(true);
     let _ = window.set_visible_on_all_workspaces(true);
@@ -523,6 +534,7 @@ pub fn stop_screensaver(app: &AppHandle, id: &str) {
             {
                 let _ = window.set_fullscreen(false);
             }
+            let _ = window.set_cursor_visible(true);
             let _ = window.emit_to(window.label(), "send-stop", true);
             let _ = window.hide();
         }
@@ -871,10 +883,17 @@ pub fn apply_settings_chrome(app: &AppHandle, glass: bool) {
 }
 
 pub fn apply_settings(app: &AppHandle) {
-    let locale = {
+    let (locale, ui_theme, background_mode, theme) = {
         let state = app.state::<AppState>();
         let store = state.store.lock().unwrap();
-        store.get_str("locale")
+        (
+            store.get_str("locale"),
+            store.get_str("ui_theme").unwrap_or_else(|| "auto".into()),
+            store
+                .get_str("backgroundMode")
+                .unwrap_or_else(|| "auto".into()),
+            store.get_str("theme").unwrap_or_else(|| "dark".into()),
+        )
     };
 
     let i18n = crate::i18n::I18n::load(app, locale.as_deref());
@@ -890,6 +909,15 @@ pub fn apply_settings(app: &AppHandle) {
 
     if let Some(window) = app.get_webview_window("about") {
         let _ = window.emit_to(window.label(), "ribbons-i18n-changed", tag);
+        let _ = window.emit_to(
+            window.label(),
+            "ribbons-theme-changed",
+            json!({
+                "ui_theme": ui_theme,
+                "backgroundMode": background_mode,
+                "theme": theme
+            }),
+        );
     }
 }
 

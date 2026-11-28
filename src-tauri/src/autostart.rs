@@ -54,6 +54,7 @@ pub fn restart_app(app: &AppHandle) {
     let args: Vec<String> = std::env::args().collect();
 
     if args.iter().any(|arg| arg == "--systemd") {
+        crate::watchdog::mark_clean_exit();
         write_log(
             app,
             "Application was run as service. Restarting systemd service.",
@@ -74,6 +75,7 @@ pub fn restart_app(app: &AppHandle) {
     }
 
     crate::single_instance::release();
+    crate::watchdog::mark_clean_exit();
 
     let uses_dev_server = !crate::config::is_packaged() && app.config().build.dev_url.is_some();
     if uses_dev_server && spawn_dev_restart(app) {
@@ -118,7 +120,17 @@ fn exit_after_restart(app: &AppHandle) {
 }
 
 #[cfg(debug_assertions)]
-fn spawn_dev_restart(app: &AppHandle) -> bool {
+pub(crate) fn spawn_dev_restart(app: &AppHandle) -> bool {
+    spawn_dev_restart_inner(app, true)
+}
+
+#[cfg(debug_assertions)]
+pub(crate) fn spawn_dev_restart_quiet(app: &AppHandle) -> bool {
+    spawn_dev_restart_inner(app, false)
+}
+
+#[cfg(debug_assertions)]
+fn spawn_dev_restart_inner(app: &AppHandle, log: bool) -> bool {
     let project_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .map(Path::to_path_buf)
@@ -129,25 +141,31 @@ fn spawn_dev_restart(app: &AppHandle) -> bool {
         .join("cli")
         .join("tauri.js");
     if !cli.is_file() {
-        write_log(
-            app,
-            "Cannot restart in dev mode: Tauri CLI is not installed",
-        );
+        if log {
+            write_log(
+                app,
+                "Cannot restart in dev mode: Tauri CLI is not installed",
+            );
+        }
         return false;
     }
 
     let Some(node) = resolve_node() else {
-        write_log(app, "Cannot restart in dev mode: node was not found");
+        if log {
+            write_log(app, "Cannot restart in dev mode: node was not found");
+        }
         return false;
     };
 
-    write_log(
-        app,
-        format!(
-            "Restarting app in dev mode with {} dev",
-            project_dir.display()
-        ),
-    );
+    if log {
+        write_log(
+            app,
+            format!(
+                "Restarting app in dev mode with {} dev",
+                project_dir.display()
+            ),
+        );
+    }
 
     #[cfg(unix)]
     {
@@ -167,7 +185,9 @@ fn spawn_dev_restart(app: &AppHandle) -> bool {
         match command.spawn() {
             Ok(_) => true,
             Err(err) => {
-                write_log(app, format!("Failed to restart app in dev mode: {err}"));
+                if log {
+                    write_log(app, format!("Failed to restart app in dev mode: {err}"));
+                }
                 false
             }
         }
@@ -187,7 +207,9 @@ fn spawn_dev_restart(app: &AppHandle) -> bool {
         {
             Ok(_) => true,
             Err(err) => {
-                write_log(app, format!("Failed to restart app in dev mode: {err}"));
+                if log {
+                    write_log(app, format!("Failed to restart app in dev mode: {err}"));
+                }
                 false
             }
         }
@@ -483,7 +505,7 @@ fn configure_macos_autostart(app: &AppHandle, enabled: bool, executable: &Path) 
     }
 }
 
-fn spawn_delayed_restart(executable: &Path, args: &[String]) -> std::io::Result<()> {
+pub(crate) fn spawn_delayed_restart(executable: &Path, args: &[String]) -> std::io::Result<()> {
     #[cfg(unix)]
     {
         #[cfg(target_os = "macos")]

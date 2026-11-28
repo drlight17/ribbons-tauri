@@ -1,6 +1,6 @@
 [package]
 name = "ribbons-tauri"
-version = "1.0.4"
+version = "1.0.5"
 description = "Ribbons Screensaver for Windows, macOS and Linux"
 authors = ["Yuri Samoilov <root@drlight.fun>"]
 edition = "2021"
@@ -58,3 +58,4 @@ tauri-plugin-single-instance = "2"
 core-foundation = "0.10"
 core-graphics = "0.25"
 objc = "0.2"
+libc = "0.2"

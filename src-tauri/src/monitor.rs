@@ -80,6 +80,7 @@ pub fn start(app: AppHandle) {
                 let close_button_due = idle_secs.map(|secs| secs < 1).unwrap_or(true);
                 if close_button_due && now >= *close_allowed_at && now - last_close_sent >= 200 {
                     if let Some(window) = app.get_webview_window(&windows::window_label(id)) {
+                        let _ = window.set_cursor_visible(true);
                         let _ = window.emit_to(window.label(), "show-close-btn", ());
                     }
                     if let Some(entry) = state.runtime.lock().unwrap().windows.get_mut(id) {

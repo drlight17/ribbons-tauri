@@ -198,7 +198,7 @@ pub fn init_defaults(store: &mut Store) -> bool {
     default!("minLength", 1);
     default!("maxLength", 6);
     default!("minWidth", 25);
-    default!("maxWidth", 55);
+    default!("maxWidth", 60);
     default!("minCurl", 0);
     default!("maxCurl", 0.15);
     default!("minTwist", 0);
@@ -211,8 +211,45 @@ pub fn init_defaults(store: &mut Store) -> bool {
     default!("hw_acc", true);
     default!("user_activity", true);
     default!("colorCycleSpeed", 3);
-    default!("horizontalSpeed", "normal");
-    default!("ribbonCount", 3);
+    default!("horizontalSpeed", 2.8);
+    default!("ribbonCount", 10);
+    let ribbon_count = store.get_u64_or("ribbonCount", 10);
+    let clamped_count = ribbon_count.clamp(1, 20);
+    if clamped_count != ribbon_count {
+        store.set("ribbonCount", clamped_count.into());
+        changed = true;
+    }
+    default!("customColorsEnabled", false);
+    // Random colors are the only non-custom mode now.
+    if store.get("singleColor") != Some(&Value::Bool(false)) {
+        store.set("singleColor", Value::Bool(false));
+        changed = true;
+    }
+    if !store.has("customColors") {
+        store.set(
+            "customColors",
+            serde_json::json!([
+                "#ff4d4d", "#ff9f1a", "#ffe14d", "#4dff88", "#2de2e6", "#4d8dff", "#8a5cff",
+                "#ff5cd0", "#ff7a7a", "#c6ff4d", "#4dffd2", "#d0d0ff", "#ffb84d", "#9dff4d",
+                "#4dfff0", "#4dc3ff", "#b44dff", "#ff4da6", "#e0e0ff", "#ffd6a3"
+            ]),
+        );
+        changed = true;
+    }
+    if let Some(Value::Array(mut colors)) = store.get("customColors").cloned() {
+        let palette = [
+            "#ff4d4d", "#ff9f1a", "#ffe14d", "#4dff88", "#2de2e6", "#4d8dff", "#8a5cff", "#ff5cd0",
+            "#ff7a7a", "#c6ff4d", "#4dffd2", "#d0d0ff", "#ffb84d", "#9dff4d", "#4dfff0", "#4dc3ff",
+            "#b44dff", "#ff4da6", "#e0e0ff", "#ffd6a3",
+        ];
+        if colors.len() < palette.len() {
+            for color in palette.iter().skip(colors.len()) {
+                colors.push(Value::String((*color).to_string()));
+            }
+            store.set("customColors", Value::Array(colors));
+            changed = true;
+        }
+    }
     default!("idle_time", 60);
     default!("logging", false);
     default!("stretched_mode", false);

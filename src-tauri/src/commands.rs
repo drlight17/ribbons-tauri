@@ -8,6 +8,18 @@ use crate::logging::write_log;
 use crate::state::AppState;
 
 #[tauri::command]
+pub fn renderer_heartbeat(app: AppHandle, window: WebviewWindow) {
+    let state = app.state::<AppState>();
+    let mut runtime = match state.runtime.lock() {
+        Ok(runtime) => runtime,
+        Err(_) => return,
+    };
+    runtime
+        .renderer_heartbeats
+        .insert(window.label().to_string(), crate::state::now_ms());
+}
+
+#[tauri::command]
 pub fn renderer_message(
     app: AppHandle,
     window: WebviewWindow,
@@ -71,7 +83,18 @@ pub fn get_update_info(app: AppHandle) -> Value {
 
 #[tauri::command]
 pub fn get_about_info(app: AppHandle) -> Value {
-    let locale = app.state::<AppState>().i18n.lock().unwrap().tag.clone();
+    let state = app.state::<AppState>();
+    let locale = state.i18n.lock().unwrap().tag.clone();
+    let (ui_theme, background_mode, theme) = {
+        let store = state.store.lock().unwrap();
+        (
+            store.get_str("ui_theme").unwrap_or_else(|| "auto".into()),
+            store
+                .get_str("backgroundMode")
+                .unwrap_or_else(|| "auto".into()),
+            store.get_str("theme").unwrap_or_else(|| "dark".into()),
+        )
+    };
     serde_json::json!({
         "name": config::APP_NAME,
         "version": app.package_info().version.to_string(),
@@ -79,7 +102,10 @@ pub fn get_about_info(app: AppHandle) -> Value {
         "website": "https://ribbons.drlight.fun/",
         "source": "https://github.com/drlight17/ribbons-tauri",
         "license": "AGPLv3 ©2026",
-        "locale": locale
+        "locale": locale,
+        "ui_theme": ui_theme,
+        "backgroundMode": background_mode,
+        "theme": theme
     })
 }
 

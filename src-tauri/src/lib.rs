@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 mod active_window;
 mod autostart;
 mod commands;
@@ -19,6 +21,7 @@ mod system_events;
 mod system_theme;
 mod tray;
 mod updates;
+pub mod watchdog;
 mod windows;
 
 use tauri::{AppHandle, Manager, RunEvent};
@@ -146,6 +149,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     monitor::start(handle.clone());
     media::start(handle.clone());
     hid::start(handle.clone());
+    watchdog::start(handle.clone());
 
     // Do not trust a cached latestVersion from a previous run.
     updates::clear_cached_version(&handle);
@@ -436,6 +440,7 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             commands::renderer_message,
+            commands::renderer_heartbeat,
             commands::get_update_info,
             commands::get_about_info,
             commands::open_external
@@ -451,6 +456,13 @@ pub fn run() {
             }
         }
         RunEvent::Exit => {
+            let quitting = app
+                .try_state::<AppState>()
+                .and_then(|state| state.runtime.lock().ok().map(|runtime| runtime.quitting))
+                .unwrap_or(false);
+            if quitting {
+                watchdog::mark_clean_exit();
+            }
             let state = app.state::<AppState>();
             state.stop_audio();
             logging::write_log(

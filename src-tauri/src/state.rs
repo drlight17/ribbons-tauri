@@ -58,6 +58,7 @@ pub struct Runtime {
     pub display_signature: String,
     pub glass_backgrounds: HashMap<String, String>,
     pub glass_capture_in_progress: bool,
+    pub renderer_heartbeats: HashMap<String, u64>,
     pub stretch_epoch_ms: u64,
 }
 
